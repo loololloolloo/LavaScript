@@ -2,8 +2,11 @@
 name = "lavascript"
 version = "0.1.0"
 edition = "2021"
-description = "LavaScript compiler with a WebAssembly backend"
+description = "LavaScript compiler with a native WebAssembly backend"
 license = "MIT"
 
 [dependencies]
-wasm-encoder = "0.239"
+wasm-encoder = "0.258"
+
+[dev-dependencies]
+wasmparser = "0.240"
