@@ -11,27 +11,37 @@
   <pre id="output"></pre>
   <script>
     const output = document.getElementById("output");
+    let wasmInstance = null;
 
-    WebAssembly.instantiateStreaming(fetch("out.wasm"), {
+    const imports = {
       lavascript: {
         print_i32(value) {
           output.textContent += `${value}\n`;
           console.log(value);
         },
         print_string(ptr, len) {
-          const bytes = new Uint8Array(instance.exports.memory.buffer, ptr, len);
+          if (!wasmInstance) throw new Error("Wasm instance is not ready");
+          const bytes = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
           const text = new TextDecoder().decode(bytes);
           output.textContent += `${text}\n`;
           console.log(text);
         }
       }
-    }).then(({ instance: wasmInstance }) => {
-      window.instance = wasmInstance;
-      wasmInstance.exports.main();
-    }).catch((error) => {
-      output.textContent = `Runtime error: ${error}`;
-      console.error(error);
-    });
+    };
+
+    async function run() {
+      try {
+        const result = await WebAssembly.instantiateStreaming(fetch("out.wasm"), imports);
+        wasmInstance = result.instance;
+        if (typeof wasmInstance.exports.main !== "function") throw new Error("Wasm module does not export main");
+        wasmInstance.exports.main();
+      } catch (error) {
+        output.textContent = `Runtime error: ${error}`;
+        console.error(error);
+      }
+    }
+
+    run();
   </script>
 </body>
 </html>
