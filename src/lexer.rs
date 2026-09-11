@@ -26,12 +26,14 @@ pub fn lex(source: &str) -> Result<Vec<Token>, String> {
             ')' => { tokens.push(Token::RightParen); i += 1; }
             ',' => { tokens.push(Token::Comma); i += 1; }
             c if c.is_ascii_digit() => {
-                let start = i; while i < chars.len() && chars[i].is_ascii_digit() { i += 1; }
+                let start = i;
+                while i < chars.len() && chars[i].is_ascii_digit() { i += 1; }
                 let value: String = chars[start..i].iter().collect();
                 tokens.push(Token::Number(value.parse().map_err(|_| "invalid number")?));
             }
             c if c.is_ascii_alphabetic() || c == '_' => {
-                let start = i; while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') { i += 1; }
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') { i += 1; }
                 let word: String = chars[start..i].iter().collect();
                 tokens.push(match word.as_str() {
                     "let" => Token::Let, "print" => Token::Print, "if" => Token::If, "else" => Token::Else,
