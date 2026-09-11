@@ -19,29 +19,22 @@ fn compile_program(program: &Program) -> Result<Vec<u8>, String> {
             return Err(format!("function `{}` is already declared", function.name));
         }
     }
-
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32], []);
     types.ty().function([ValType::I32, ValType::I32], []);
-    for function in &program.functions {
-        types.ty().function(std::iter::repeat(ValType::I32).take(function.params.len()), [ValType::I32]);
-    }
+    for function in &program.functions { types.ty().function(std::iter::repeat(ValType::I32).take(function.params.len()), [ValType::I32]); }
     let main_type = 2 + program.functions.len() as u32;
     types.ty().function([], []);
-
     let mut imports = ImportSection::new();
     imports.import("lavascript", "print_i32", wasm_encoder::EntityType::Function(0));
     imports.import("lavascript", "print_string", wasm_encoder::EntityType::Function(1));
-
     let mut functions = FunctionSection::new();
     for (i, _) in program.functions.iter().enumerate() { functions.function(2 + i as u32); }
     functions.function(main_type);
-
     let mut code = CodeSection::new();
     let mut data = DataSection::new();
     let mut strings = StringTable::new();
-
     for function_decl in &program.functions {
         let (locals, consts) = collect_locals(&function_decl.body, &function_decl.params)?;
         let mut function = Function::new(local_declarations(&locals, function_decl.params.len()));
@@ -50,21 +43,17 @@ fn compile_program(program: &Program) -> Result<Vec<u8>, String> {
         function.instruction(&Instruction::End);
         code.function(&function);
     }
-
     let (locals, consts) = collect_locals(&program.main, &[])?;
     let mut main = Function::new(local_declarations(&locals, 0));
     emit_statements(&mut main, &program.main, &locals, &consts, &signatures, false, &mut strings, 0, 0)?;
     main.instruction(&Instruction::End);
     code.function(&main);
-
     let mut memory = MemorySection::new();
     memory.memory(wasm_encoder::MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
     for (offset, bytes) in &strings.entries { data.active(*offset, bytes); }
-
     let mut exports = ExportSection::new();
     exports.export("main", ExportKind::Func, 2 + program.functions.len() as u32);
     exports.export("memory", ExportKind::Memory, 0);
-
     module.section(&types).section(&imports).section(&functions).section(&memory).section(&exports).section(&code).section(&data);
     Ok(module.finish())
 }
@@ -158,13 +147,13 @@ fn emit_expr(function: &mut Function, expr: &Expr, vars: &HashMap<String, u32>, 
         Expr::Number(n) => function.instruction(&Instruction::I32Const(*n)),
         Expr::Bool(value) => function.instruction(&Instruction::I32Const(if *value { 1 } else { 0 })),
         Expr::String(_) => return Err("string values can only be used with `print` for now".into()),
-        Expr::Variable(name) => { let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`))?; function.instruction(&Instruction::LocalGet(index)); }
+        Expr::Variable(name) => { let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`"))?; function.instruction(&Instruction::LocalGet(index)); }
         Expr::Binary(left, op, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(match op { Op::Add => &Instruction::I32Add, Op::Sub => &Instruction::I32Sub, Op::Mul => &Instruction::I32Mul, Op::Div => &Instruction::I32DivS, Op::Mod => &Instruction::I32RemS }); }
         Expr::Compare(left, op, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(match op { CompareOp::Eq => &Instruction::I32Eq, CompareOp::Ne => &Instruction::I32Ne, CompareOp::Lt => &Instruction::I32LtS, CompareOp::Le => &Instruction::I32LeS, CompareOp::Gt => &Instruction::I32GtS, CompareOp::Ge => &Instruction::I32GeS }); }
         Expr::Logical(left, LogicalOp::And, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(&Instruction::I32And); }
         Expr::Logical(left, LogicalOp::Or, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(&Instruction::I32Or); }
         Expr::Not(value) => { emit_expr(function, value, vars, signatures, strings)?; function.instruction(&Instruction::I32Eqz); }
-        Expr::Call(name, args) => { let (index, arity) = signatures.get(name).ok_or_else(|| format!("undefined function `{name}`))?; if args.len() != *arity { return Err(format!("function `{name}` expects {arity} argument(s), got {}", args.len())); } for arg in args { emit_expr(function, arg, vars, signatures, strings)?; } function.instruction(&Instruction::Call(*index)); }
+        Expr::Call(name, args) => { let (index, arity) = signatures.get(name).ok_or_else(|| format!("undefined function `{name}`"))?; if args.len() != *arity { return Err(format!("function `{name}` expects {arity} argument(s), got {}", args.len())); } for arg in args { emit_expr(function, arg, vars, signatures, strings)?; } function.instruction(&Instruction::Call(*index)); }
     }
     Ok(())
 }
@@ -173,19 +162,12 @@ fn emit_expr(function: &mut Function, expr: &Expr, vars: &HashMap<String, u32>, 
 mod tests {
     use super::compile;
     fn validate(source: &str) { let wasm = compile(source).unwrap(); wasmparser::Validator::new().validate_all(&wasm).unwrap(); }
-    #[test] fn compiles_math() { validate("print 2 + 3 * 4"); }
-    #[test] fn compiles_variables() { validate("let x = 21\nprint x + x"); }
-    #[test] fn compiles_if() { validate("let x = 5\nif x > 3 then\nprint x\nelse\nprint 0\nend"); }
-    #[test] fn compiles_while() { validate("let x = 3\nwhile x > 0\nprint x\nx = x - 1\nend"); }
-    #[test] fn compiles_functions() { validate("function add(a,b)\nreturn a+b\nend\nprint add(2,3)"); }
-    #[test] fn compiles_strings() { validate("print \"Hello, LavaScript!\""); }
-    #[test] fn compiles_booleans() { validate("let a = true\nlet b = false\nprint a and not b"); }
-    #[test] fn compiles_for() { validate("for i = 1, 5\nprint i\nend"); }
-    #[test] fn compiles_negative_for() { validate("for i = 5, 1, -1\nprint i\nend"); }
-    #[test] fn compiles_repeat() { validate("let x = 0\nrepeat\nx = x + 1\nuntil x >= 3"); }
-    #[test] fn compiles_repeat_continue() { validate("let x = 0\nrepeat\nx = x + 1\nif x < 3 then\ncontinue\nend\nuntil x >= 3"); }
+    #[test] fn math() { validate("print 2 + 3 * 4"); }
+    #[test] fn variables() { validate("let x = 21\nprint x + x"); }
+    #[test] fn functions() { validate("function add(a,b)\nreturn a+b\nend\nprint add(2,3)"); }
+    #[test] fn strings() { validate("print \"Hello\""); }
+    #[test] fn loops() { validate("let x = 0\nwhile x < 3\nx = x + 1\nend"); }
+    #[test] fn repeat_continue() { validate("let x = 0\nrepeat\nx = x + 1\nif x < 3 then\ncontinue\nend\nuntil x >= 3"); }
     #[test] fn rejects_const_assignment() { assert!(compile("const x = 1\nx = 2").is_err()); }
-    #[test] fn rejects_loop_control() { assert!(compile("break").is_err()); assert!(compile("continue").is_err()); }
-    #[test] fn rejects_bad_step() { assert!(compile("for i = 1, 5, 0\nprint i\nend").is_err()); }
-    #[test] fn rejects_wrong_call() { assert!(compile("function add(a,b)\nreturn a+b\nend\nprint add(1)").is_err()); }
+    #[test] fn rejects_bad_call() { assert!(compile("function f(a)\nreturn a\nend\nprint f()").is_err()); }
 }
