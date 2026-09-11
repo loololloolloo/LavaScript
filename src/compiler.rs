@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wasm_encoder::{BlockType, CodeSection, DataSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction, MemorySection, Module, TypeSection, ValType};
 use crate::{lexer, parser::{self, CompareOp, Expr, LogicalOp, Op, Program, Stmt}};
 
@@ -28,16 +28,16 @@ pub fn compile(source: &str) -> Result<Vec<u8>, String> {
     let mut data = DataSection::new();
     let mut strings = StringTable::new();
     for function_decl in &program.functions {
-        let locals = collect_locals(&function_decl.body, &function_decl.params)?;
+        let (locals, consts) = collect_locals(&function_decl.body, &function_decl.params)?;
         let mut function = Function::new(local_declarations(&locals, function_decl.params.len()));
-        emit_statements(&mut function, &function_decl.body, &locals, &signatures, true, &mut strings, 0)?;
+        emit_statements(&mut function, &function_decl.body, &locals, &consts, &signatures, true, &mut strings, 0)?;
         function.instruction(&Instruction::I32Const(0));
         function.instruction(&Instruction::End);
         code.function(&function);
     }
-    let main_locals = collect_locals(&program.main, &[])?;
+    let (main_locals, main_consts) = collect_locals(&program.main, &[])?;
     let mut main = Function::new(local_declarations(&main_locals, 0));
-    emit_statements(&mut main, &program.main, &main_locals, &signatures, false, &mut strings, 0)?;
+    emit_statements(&mut main, &program.main, &main_locals, &main_consts, &signatures, false, &mut strings, 0)?;
     main.instruction(&Instruction::End);
     code.function(&main);
     let mut memory = MemorySection::new();
@@ -56,35 +56,40 @@ impl StringTable {
     fn intern(&mut self, value: &str) -> u32 {
         let wanted = value.as_bytes();
         if let Some((offset, _)) = self.entries.iter().find(|(_, bytes)| bytes.as_slice() == wanted) { return *offset; }
-        let offset = self.next;
-        let bytes = wanted.to_vec();
-        self.next += bytes.len() as u32 + 1;
-        self.entries.push((offset, bytes));
-        offset
+        let offset = self.next; let bytes = wanted.to_vec(); self.next += bytes.len() as u32 + 1; self.entries.push((offset, bytes)); offset
     }
 }
 
-fn local_declarations(locals: &HashMap<String, u32>, param_count: usize) -> Vec<(u32, ValType)> {
-    let count = locals.len().saturating_sub(param_count); if count == 0 { Vec::new() } else { vec![(count as u32, ValType::I32)] }
-}
-fn collect_locals(statements: &[Stmt], params: &[String]) -> Result<HashMap<String, u32>, String> { let mut locals=HashMap::new(); for (index,name) in params.iter().enumerate(){locals.insert(name.clone(),index as u32);} collect_locals_into(statements,&mut locals) }
-fn collect_locals_into(statements: &[Stmt], locals: &mut HashMap<String,u32>) -> Result<(),String>{for stmt in statements{match stmt{Stmt::Let(name,_)=>{if locals.contains_key(name){return Err(format!("variable `{name}` is already declared"));}let index=locals.len() as u32;locals.insert(name.clone(),index);}Stmt::Assign(name,_)=>{if !locals.contains_key(name){return Err(format!("undefined variable `{name}`"));}}Stmt::If{then_body,else_body,..}=>{collect_locals_into(then_body,locals)?;collect_locals_into(else_body,locals)?;}Stmt::While{body,..}=>collect_locals_into(body,locals)?,Stmt::Print(_) | Stmt::Return(_) | Stmt::Break=>{}}}Ok(())}
+fn local_declarations(locals: &HashMap<String, u32>, param_count: usize) -> Vec<(u32, ValType)> { let count=locals.len().saturating_sub(param_count); if count==0{Vec::new()}else{vec![(count as u32,ValType::I32)]} }
+fn collect_locals(statements:&[Stmt],params:&[String])->Result<(HashMap<String,u32>,HashSet<String>),String>{let mut locals=HashMap::new();let mut consts=HashSet::new();for(index,name)in params.iter().enumerate(){locals.insert(name.clone(),index as u32);}collect_locals_into(statements,&mut locals,&mut consts)?;Ok((locals,consts))}
+fn collect_locals_into(statements:&[Stmt],locals:&mut HashMap<String,u32>,consts:&mut HashSet<String>)->Result<(),String>{for stmt in statements{match stmt{
+    Stmt::Let(name,_)=>{if locals.contains_key(name){return Err(format!("variable `{name}` is already declared"));}let index=locals.len() as u32;locals.insert(name.clone(),index);}
+    Stmt::Const(name,_)=>{if locals.contains_key(name){return Err(format!("variable `{name}` is already declared"));}let index=locals.len() as u32;locals.insert(name.clone(),index);consts.insert(name.clone());}
+    Stmt::Assign(name,_)=>{if !locals.contains_key(name){return Err(format!("undefined variable `{name}`"));}if consts.contains(name){return Err(format!("cannot assign to constant `{name}`"));}}
+    Stmt::If{then_body,else_body,..}=>{collect_locals_into(then_body,locals,consts)?;collect_locals_into(else_body,locals,consts)?;}
+    Stmt::While{body,..}|Stmt::Repeat{body,..}|Stmt::Do{body,..}=>collect_locals_into(body,locals,consts)?,
+    Stmt::For{name,body,..}=>{if !locals.contains_key(name){let index=locals.len() as u32;locals.insert(name.clone(),index);}collect_locals_into(body,locals,consts)?;}
+    Stmt::Print(_) | Stmt::Return(_) | Stmt::Break | Stmt::Continue=>{}
+}}Ok(())}
 
-fn emit_statements(function:&mut Function,statements:&[Stmt],vars:&HashMap<String,u32>,signatures:&Signatures,in_function:bool,strings:&mut StringTable,break_depth:usize)->Result<(),String>{
+fn emit_statements(function:&mut Function,statements:&[Stmt],vars:&HashMap<String,u32>,consts:&HashSet<String>,signatures:&Signatures,in_function:bool,strings:&mut StringTable,loop_depth:usize)->Result<(),String>{
     for stmt in statements{match stmt{
-        Stmt::Let(name,expr)|Stmt::Assign(name,expr)=>{emit_expr(function,expr,vars,signatures,strings)?;let index=*vars.get(name).ok_or_else(||format!("undefined variable `{name}`"))?;function.instruction(&Instruction::LocalSet(index));}
+        Stmt::Let(name,expr)|Stmt::Const(name,expr)=>{emit_expr(function,expr,vars,signatures,strings)?;let index=*vars.get(name).ok_or_else(||format!("undefined variable `{name}`"))?;function.instruction(&Instruction::LocalSet(index));}
+        Stmt::Assign(name,expr)=>{if consts.contains(name){return Err(format!("cannot assign to constant `{name}`"));}emit_expr(function,expr,vars,signatures,strings)?;let index=*vars.get(name).ok_or_else(||format!("undefined variable `{name}`"))?;function.instruction(&Instruction::LocalSet(index));}
         Stmt::Print(expr)=>{match expr{Expr::String(value)=>{let offset=strings.intern(value);let len=value.len() as i32;function.instruction(&Instruction::I32Const(offset as i32));function.instruction(&Instruction::I32Const(len));function.instruction(&Instruction::Call(1));}_=>{emit_expr(function,expr,vars,signatures,strings)?;function.instruction(&Instruction::Call(0));}}}
         Stmt::Return(expr)=>{if !in_function{return Err("`return` is only valid inside a function".into());}emit_expr(function,expr,vars,signatures,strings)?;function.instruction(&Instruction::Return);}
-        Stmt::If{condition,then_body,else_body}=>{emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::If(BlockType::Empty));emit_statements(function,then_body,vars,signatures,in_function,strings,break_depth+1)?;if !else_body.is_empty(){function.instruction(&Instruction::Else);emit_statements(function,else_body,vars,signatures,in_function,strings,break_depth+1)?;}function.instruction(&Instruction::End);}
-        Stmt::While{condition,body}=>{function.instruction(&Instruction::Block(BlockType::Empty));function.instruction(&Instruction::Loop(BlockType::Empty));emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::I32Eqz);function.instruction(&Instruction::BrIf(1));emit_statements(function,body,vars,signatures,in_function,strings,1)?;function.instruction(&Instruction::Br(0));function.instruction(&Instruction::End);function.instruction(&Instruction::End);}
-        Stmt::Break=>{if break_depth==0{return Err("`break` is only valid inside a while loop".into());}function.instruction(&Instruction::Br(break_depth as u32));}
+        Stmt::If{condition,then_body,else_body}=>{emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::If(BlockType::Empty));emit_statements(function,then_body,vars,consts,signatures,in_function,strings,loop_depth)?;if !else_body.is_empty(){function.instruction(&Instruction::Else);emit_statements(function,else_body,vars,consts,signatures,in_function,strings,loop_depth)?;}function.instruction(&Instruction::End);}
+        Stmt::While{condition,body}=>{function.instruction(&Instruction::Block(BlockType::Empty));function.instruction(&Instruction::Loop(BlockType::Empty));emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::I32Eqz);function.instruction(&Instruction::BrIf(1));emit_statements(function,body,vars,consts,signatures,in_function,strings,loop_depth+1)?;function.instruction(&Instruction::Br(0));function.instruction(&Instruction::End);function.instruction(&Instruction::End);}
+        Stmt::For{name,start,end,step,body}=>{let step_value=match step{Expr::Number(n) if *n!=0=>*n,_=>return Err("`for` step must be a non-zero numeric literal".into())};let index=*vars.get(name).ok_or_else(||format!("undefined variable `{name}`"))?;emit_expr(function,start,vars,signatures,strings)?;function.instruction(&Instruction::LocalSet(index));function.instruction(&Instruction::Block(BlockType::Empty));function.instruction(&Instruction::Loop(BlockType::Empty));function.instruction(&Instruction::LocalGet(index));emit_expr(function,end,vars,signatures,strings)?;if step_value>0{function.instruction(&Instruction::I32GtS);function.instruction(&Instruction::I32Eqz);}else{function.instruction(&Instruction::I32LtS);function.instruction(&Instruction::I32Eqz);}function.instruction(&Instruction::BrIf(1));emit_statements(function,body,vars,consts,signatures,in_function,strings,loop_depth+1)?;function.instruction(&Instruction::LocalGet(index));function.instruction(&Instruction::I32Const(step_value));function.instruction(&Instruction::I32Add);function.instruction(&Instruction::LocalSet(index));function.instruction(&Instruction::Br(0));function.instruction(&Instruction::End);function.instruction(&Instruction::End);}
+        Stmt::Repeat{body,condition}=>{function.instruction(&Instruction::Block(BlockType::Empty));function.instruction(&Instruction::Loop(BlockType::Empty));emit_statements(function,body,vars,consts,signatures,in_function,strings,loop_depth+1)?;emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::BrIf(1));function.instruction(&Instruction::Br(0));function.instruction(&Instruction::End);function.instruction(&Instruction::End);}
+        Stmt::Do{body}=>emit_statements(function,body,vars,consts,signatures,in_function,strings,loop_depth)?,
+        Stmt::Break=>{if loop_depth==0{return Err("`break` is only valid inside a loop".into());}function.instruction(&Instruction::Br(loop_depth as u32));}
+        Stmt::Continue=>{if loop_depth==0{return Err("`continue` is only valid inside a loop".into());}function.instruction(&Instruction::Br(0));}
     }}Ok(())
 }
 
 fn emit_expr(function:&mut Function,expr:&Expr,vars:&HashMap<String,u32>,signatures:&Signatures,strings:&mut StringTable)->Result<(),String>{match expr{
-    Expr::Number(n)=>function.instruction(&Instruction::I32Const(*n)),
-    Expr::Bool(value)=>function.instruction(&Instruction::I32Const(if *value{1}else{0})),
-    Expr::String(_)=>return Err("string values can only be used with `print` for now".into()),
+    Expr::Number(n)=>function.instruction(&Instruction::I32Const(*n)),Expr::Bool(value)=>function.instruction(&Instruction::I32Const(if *value{1}else{0})),Expr::String(_)=>return Err("string values can only be used with `print` for now".into()),
     Expr::Variable(name)=>{let index=vars.get(name).ok_or_else(||format!("undefined variable `{name}`"))?;function.instruction(&Instruction::LocalGet(*index));}
     Expr::Binary(left,op,right)=>{emit_expr(function,left,vars,signatures,strings)?;emit_expr(function,right,vars,signatures,strings)?;function.instruction(match op{Op::Add=>&Instruction::I32Add,Op::Sub=>&Instruction::I32Sub,Op::Mul=>&Instruction::I32Mul,Op::Div=>&Instruction::I32DivS,Op::Mod=>&Instruction::I32RemS});}
     Expr::Compare(left,op,right)=>{emit_expr(function,left,vars,signatures,strings)?;emit_expr(function,right,vars,signatures,strings)?;function.instruction(match op{CompareOp::Eq=>&Instruction::I32Eq,CompareOp::Ne=>&Instruction::I32Ne,CompareOp::Lt=>&Instruction::I32LtS,CompareOp::Le=>&Instruction::I32LeS,CompareOp::Gt=>&Instruction::I32GtS,CompareOp::Ge=>&Instruction::I32GeS});}
@@ -101,14 +106,19 @@ mod tests{use super::compile;fn validate(source:&str){let wasm=compile(source).u
 #[test]fn compiles_if_else(){validate("let x = 5\nif x > 3 then\nprint x\nelse\nprint 0\nend");}
 #[test]fn compiles_while(){validate("let x = 3\nwhile x > 0\nprint x\nx = x - 1\nend");}
 #[test]fn compiles_functions(){validate("function add(a,b)\nreturn a+b\nend\nprint add(2,3)");}
-#[test]fn compiles_recursive_function_indexing(){validate("function add(a,b)\nreturn a+b\nend\nfunction twice(x)\nreturn add(x,x)\nend\nprint twice(4)");}
+#[test]fn compiles_multiple_function_calls(){validate("function add(a,b)\nreturn a+b\nend\nfunction twice(x)\nreturn add(x,x)\nend\nprint twice(4)");}
 #[test]fn compiles_strings(){validate("print \"Hello, LavaScript!\"");}
 #[test]fn compiles_escaped_strings(){validate("print \"line1\\nline2\"");}
 #[test]fn compiles_booleans_and_logic(){validate("let a = true\nlet b = false\nprint a and not b\nprint a && b\nprint a or b\nprint a || b");}
 #[test]fn compiles_modulo_and_unary(){validate("print -10 % 3");}
-#[test]fn compiles_break(){validate("let x = 5\nwhile x > 0\nif x == 3 then\nbreak\nend\nx = x - 1\nend");}
-#[test]fn compiles_elseif(){validate("let x = 2\nif x == 1 then\nprint 1\nelseif x == 2 then\nprint 2\nelse\nprint 3\nend");}
-#[test]fn rejects_break_outside_loop(){assert!(compile("break").is_err());}
+#[test]fn compiles_break_and_continue(){validate("let x = 5\nwhile x > 0\nx = x - 1\nif x == 3 then\ncontinue\nend\nif x == 1 then\nbreak\nend\nend");}
+#[test]fn compiles_for_loop(){validate("for i = 1, 5\nprint i\nend");}
+#[test]fn compiles_negative_for_loop(){validate("for i = 5, 1, -1\nprint i\nend");}
+#[test]fn compiles_repeat_and_do(){validate("let x = 0\nrepeat\nx = x + 1\nuntil x >= 3\ndo\nprint x\nend");}
+#[test]fn compiles_const(){validate("const x = 42\nprint x");}
+#[test]fn rejects_const_assignment(){assert!(compile("const x = 1\nx = 2").is_err());}
+#[test]fn rejects_loop_control_outside_loop(){assert!(compile("break").is_err());assert!(compile("continue").is_err());}
+#[test]fn rejects_bad_for_step(){assert!(compile("for i = 1, 5, 0\nprint i\nend").is_err());}
 #[test]fn rejects_string_expression(){assert!(compile("let x = \"hi\"").is_err());}
 #[test]fn rejects_undefined_function(){assert!(compile("print missing(1)").is_err());}
 #[test]fn rejects_wrong_argument_count(){assert!(compile("function add(a,b)\nreturn a+b\nend\nprint add(1)").is_err());}}
