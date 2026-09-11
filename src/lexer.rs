@@ -2,6 +2,11 @@
 pub enum Token {
     Let,
     Print,
+    If,
+    Else,
+    While,
+    Then,
+    End,
     Identifier(String),
     Number(i32),
     Plus,
@@ -9,6 +14,12 @@ pub enum Token {
     Star,
     Slash,
     Equal,
+    EqualEqual,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
     LeftParen,
     RightParen,
     Newline,
@@ -23,7 +34,26 @@ pub fn lex(source: &str) -> Result<Vec<Token>, String> {
         match chars[i] {
             ' ' | '\t' | '\r' => i += 1,
             '\n' => { tokens.push(Token::Newline); i += 1; }
-            '=' => { tokens.push(Token::Equal); i += 1; }
+            '=' => {
+                i += 1;
+                if i < chars.len() && chars[i] == '=' { tokens.push(Token::EqualEqual); i += 1; }
+                else { tokens.push(Token::Equal); }
+            }
+            '!' => {
+                i += 1;
+                if i < chars.len() && chars[i] == '=' { tokens.push(Token::NotEqual); i += 1; }
+                else { return Err("unexpected character `!`".into()); }
+            }
+            '<' => {
+                i += 1;
+                if i < chars.len() && chars[i] == '=' { tokens.push(Token::LessEqual); i += 1; }
+                else { tokens.push(Token::Less); }
+            }
+            '>' => {
+                i += 1;
+                if i < chars.len() && chars[i] == '=' { tokens.push(Token::GreaterEqual); i += 1; }
+                else { tokens.push(Token::Greater); }
+            }
             '+' => { tokens.push(Token::Plus); i += 1; }
             '-' => { tokens.push(Token::Minus); i += 1; }
             '*' => { tokens.push(Token::Star); i += 1; }
@@ -43,6 +73,11 @@ pub fn lex(source: &str) -> Result<Vec<Token>, String> {
                 tokens.push(match word.as_str() {
                     "let" => Token::Let,
                     "print" => Token::Print,
+                    "if" => Token::If,
+                    "else" => Token::Else,
+                    "while" => Token::While,
+                    "then" => Token::Then,
+                    "end" => Token::End,
                     _ => Token::Identifier(word),
                 });
             }
