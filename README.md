@@ -25,46 +25,53 @@ WebAssembly (.wasm)
 
 ## Current language features
 
-The compiler bootstrap now supports:
+The compiler bootstrap supports:
 
 - integer numbers and arithmetic: `+`, `-`, `*`, `/`, `%`
-- variables with `let` and reassignment
+- numeric separators: `1_000`
+- hexadecimal and binary integers: `0xff`, `0b1010`
+- variables with `let` or `local` and reassignment
+- immutable `const` variables
 - booleans: `true`, `false`
 - comparisons: `==`, `!=`, `<`, `<=`, `>`, `>=`
 - logical operators: `and`, `or`, `not`
 - JavaScript-style logical spellings: `&&`, `||`, `!`
 - `if`, `elseif`, `else`, and `end`
 - `while` loops
-- `break`
+- numeric `for` loops with positive or negative literal steps
+- `repeat ... until` loops
+- `do ... end` blocks
+- `break` and `continue` in `while` / `for` loops
 - functions with parameters and return values
-- string literals with `\\n`, `\\r`, `\\t`, `\\"`, and `\\\\` escapes
+- string literals using single or double quotes
+- string escapes: `\\n`, `\\r`, `\\t`, `\\"`, `\\'`, and `\\\\`
 - `print` for integers, booleans, and string literals
 - `--` and `//` single-line comments
+- semicolons as optional statement separators
 - WebAssembly linear memory for string data
 - browser execution through the included runtime
 
 Example:
 
 ```lavascript
-function clamp(value, low, high)
-    if value < low then
-        return low
-    elseif value > high then
-        return high
+const start = 1
+
+for i = start, 8
+    if i == 3 then
+        continue
     end
-    return value
+    if i == 7 then
+        break
+    end
+    print i
 end
 
-let x = 12
-let enabled = true
+let n = 0
+repeat
+    n = n + 1
+until n >= 3
 
-while enabled
-    print clamp(x, 0, 10)
-    x = x - 1
-    if x == 0 then
-        enabled = false
-    end
-end
+print 'done'
 ```
 
 ## Build
@@ -95,7 +102,8 @@ For browser execution, serve the runtime directory over HTTP and put the generat
 - [x] Functions
 - [x] Strings and browser memory runtime
 - [x] Booleans and logical operators
-- [x] Loop `break`
+- [x] Extended loop control
+- [x] Constants and numeric literal formats
 - [ ] Static type checker
 - [ ] Arrays
 - [ ] Objects / tables
