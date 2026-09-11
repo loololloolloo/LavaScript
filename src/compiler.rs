@@ -72,12 +72,12 @@ fn collect_locals_into(statements: &[Stmt], locals: &mut HashMap<String,u32>) ->
 
 fn emit_statements(function:&mut Function,statements:&[Stmt],vars:&HashMap<String,u32>,signatures:&Signatures,in_function:bool,strings:&mut StringTable,break_depth:usize)->Result<(),String>{
     for stmt in statements{match stmt{
-        Stmt::Let(name,expr)|Stmt::Assign(name,expr)=>{emit_expr(function,expr,vars,signatures,strings)?;let index=*vars.get(name).ok_or_else(||format!("undefined variable `{name}`))?;function.instruction(&Instruction::LocalSet(index));}
+        Stmt::Let(name,expr)|Stmt::Assign(name,expr)=>{emit_expr(function,expr,vars,signatures,strings)?;let index=*vars.get(name).ok_or_else(||format!("undefined variable `{name}`"))?;function.instruction(&Instruction::LocalSet(index));}
         Stmt::Print(expr)=>{match expr{Expr::String(value)=>{let offset=strings.intern(value);let len=value.len() as i32;function.instruction(&Instruction::I32Const(offset as i32));function.instruction(&Instruction::I32Const(len));function.instruction(&Instruction::Call(1));}_=>{emit_expr(function,expr,vars,signatures,strings)?;function.instruction(&Instruction::Call(0));}}}
         Stmt::Return(expr)=>{if !in_function{return Err("`return` is only valid inside a function".into());}emit_expr(function,expr,vars,signatures,strings)?;function.instruction(&Instruction::Return);}
         Stmt::If{condition,then_body,else_body}=>{emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::If(BlockType::Empty));emit_statements(function,then_body,vars,signatures,in_function,strings,break_depth+1)?;if !else_body.is_empty(){function.instruction(&Instruction::Else);emit_statements(function,else_body,vars,signatures,in_function,strings,break_depth+1)?;}function.instruction(&Instruction::End);}
         Stmt::While{condition,body}=>{function.instruction(&Instruction::Block(BlockType::Empty));function.instruction(&Instruction::Loop(BlockType::Empty));emit_expr(function,condition,vars,signatures,strings)?;function.instruction(&Instruction::I32Eqz);function.instruction(&Instruction::BrIf(1));emit_statements(function,body,vars,signatures,in_function,strings,1)?;function.instruction(&Instruction::Br(0));function.instruction(&Instruction::End);function.instruction(&Instruction::End);}
-        Stmt::Break=>{if break_depth==0{return Err("`break` is only valid inside a while loop".into());}function.instruction(&Instruction::Br((break_depth) as u32));}
+        Stmt::Break=>{if break_depth==0{return Err("`break` is only valid inside a while loop".into());}function.instruction(&Instruction::Br(break_depth as u32));}
     }}Ok(())
 }
 
