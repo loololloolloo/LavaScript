@@ -6,6 +6,8 @@ pub enum Token {
     Else,
     While,
     Then,
+    Function,
+    Return,
     End,
     Identifier(String),
     Number(i32),
@@ -22,6 +24,7 @@ pub enum Token {
     GreaterEqual,
     LeftParen,
     RightParen,
+    Comma,
     Newline,
     Eof,
 }
@@ -36,7 +39,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, String> {
             '\n' => { tokens.push(Token::Newline); i += 1; }
             '=' => {
                 i += 1;
-                if i < chars.len() && chars[i] == '=' { tokens.push(Token::EqualEqual); i += 1; }
+                if i < chars.len() && chars[i] == '=' { tokens.push(Token::EqualEqual); i += 1); }
                 else { tokens.push(Token::Equal); }
             }
             '!' => {
@@ -60,6 +63,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, String> {
             '/' => { tokens.push(Token::Slash); i += 1; }
             '(' => { tokens.push(Token::LeftParen); i += 1; }
             ')' => { tokens.push(Token::RightParen); i += 1; }
+            ',' => { tokens.push(Token::Comma); i += 1; }
             c if c.is_ascii_digit() => {
                 let start = i;
                 while i < chars.len() && chars[i].is_ascii_digit() { i += 1; }
@@ -77,6 +81,8 @@ pub fn lex(source: &str) -> Result<Vec<Token>, String> {
                     "else" => Token::Else,
                     "while" => Token::While,
                     "then" => Token::Then,
+                    "function" => Token::Function,
+                    "return" => Token::Return,
                     "end" => Token::End,
                     _ => Token::Identifier(word),
                 });
