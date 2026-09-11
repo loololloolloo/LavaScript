@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LavaScript WebAssembly Runtime</title>
+</head>
+<body>
+  <h1>LavaScript</h1>
+  <p>WebAssembly runtime demo. Build an <code>out.wasm</code> module and place it beside this file.</p>
+  <pre id="output"></pre>
+  <script>
+    const output = document.getElementById("output");
+
+    WebAssembly.instantiateStreaming(fetch("out.wasm"), {
+      lavascript: {
+        print_i32(value) {
+          output.textContent += `${value}\n`;
+          console.log(value);
+        }
+      }
+    }).then(({ instance }) => {
+      instance.exports.main();
+    }).catch((error) => {
+      output.textContent = `Runtime error: ${error}`;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>
