@@ -1,7 +1,7 @@
 use crate::lexer::Token;
 
 #[derive(Debug, Clone)]
-pub enum Expr { Number(i32), Variable(String), Binary(Box<Expr>, Op, Box<Expr>), Compare(Box<Expr>, CompareOp, Box<Expr>), Call(String, Vec<Expr>) }
+pub enum Expr { Number(i32), String(String), Variable(String), Binary(Box<Expr>, Op, Box<Expr>), Compare(Box<Expr>, CompareOp, Box<Expr>), Call(String, Vec<Expr>) }
 #[derive(Debug, Clone)]
 pub enum Op { Add, Sub, Mul, Div }
 #[derive(Debug, Clone)]
@@ -51,5 +51,5 @@ impl<'a> Parser<'a> {
     fn expr(&mut self)->Result<Expr,String>{let mut left=self.term()?;loop{let op=match self.tokens.get(self.pos){Some(Token::Plus)=>Op::Add,Some(Token::Minus)=>Op::Sub,_=>break};self.pos+=1;left=Expr::Binary(Box::new(left),op,Box::new(self.term()?));}match self.tokens.get(self.pos){Some(Token::EqualEqual)=>self.compare(left,CompareOp::Eq),Some(Token::NotEqual)=>self.compare(left,CompareOp::Ne),Some(Token::Less)=>self.compare(left,CompareOp::Lt),Some(Token::LessEqual)=>self.compare(left,CompareOp::Le),Some(Token::Greater)=>self.compare(left,CompareOp::Gt),Some(Token::GreaterEqual)=>self.compare(left,CompareOp::Ge),_=>Ok(left)}}
     fn compare(&mut self,left:Expr,op:CompareOp)->Result<Expr,String>{self.pos+=1;Ok(Expr::Compare(Box::new(left),op,Box::new(self.term()?)))}
     fn term(&mut self)->Result<Expr,String>{let mut left=self.primary()?;loop{let op=match self.tokens.get(self.pos){Some(Token::Star)=>Op::Mul,Some(Token::Slash)=>Op::Div,_=>break};self.pos+=1;left=Expr::Binary(Box::new(left),op,Box::new(self.primary()?));}Ok(left)}
-    fn primary(&mut self)->Result<Expr,String>{match self.tokens.get(self.pos){Some(Token::Number(n))=>{let n=*n;self.pos+=1;Ok(Expr::Number(n))},Some(Token::Identifier(s))=>{let name=s.clone();self.pos+=1;if self.at(&Token::LeftParen){self.pos+=1;let mut args=Vec::new();if !self.at(&Token::RightParen){loop{args.push(self.expr()?);if self.at(&Token::Comma){self.pos+=1;}else{break;}}}self.expect(Token::RightParen,"expected `)` after function arguments")?;Ok(Expr::Call(name,args))}else{Ok(Expr::Variable(name))}},Some(Token::LeftParen)=>{self.pos+=1;let e=self.expr()?;self.expect(Token::RightParen,"expected `)`")?;Ok(e)},_=>Err("expected expression".into())}}
+    fn primary(&mut self)->Result<Expr,String>{match self.tokens.get(self.pos){Some(Token::Number(n))=>{let n=*n;self.pos+=1;Ok(Expr::Number(n))},Some(Token::String(s))=>{let s=s.clone();self.pos+=1;Ok(Expr::String(s))},Some(Token::Identifier(s))=>{let name=s.clone();self.pos+=1;if self.at(&Token::LeftParen){self.pos+=1;let mut args=Vec::new();if !self.at(&Token::RightParen){loop{args.push(self.expr()?);if self.at(&Token::Comma){self.pos+=1;}else{break;}}}self.expect(Token::RightParen,"expected `)` after function arguments")?;Ok(Expr::Call(name,args))}else{Ok(Expr::Variable(name))}},Some(Token::LeftParen)=>{self.pos+=1;let e=self.expr()?;self.expect(Token::RightParen,"expected `)`")?;Ok(e)},_=>Err("expected expression".into())}}
 }
