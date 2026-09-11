@@ -8,8 +8,7 @@ pub fn compile(source: &str) -> Result<Vec<u8>, String> {
     let tokens = lexer::lex(source)?;
     let parsed = parser::parse(&tokens)?;
     checker::check(&parsed)?;
-    let program = optimizer::optimize(parsed);
-    compile_program(&program)
+    compile_program(&optimizer::optimize(parsed))
 }
 
 fn compile_program(program: &Program) -> Result<Vec<u8>, String> {
@@ -48,7 +47,7 @@ fn compile_program(program: &Program) -> Result<Vec<u8>, String> {
     code.function(&main);
     let mut memory = MemorySection::new();
     memory.memory(wasm_encoder::MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
-    for (offset, bytes) in &strings.entries { data.active(0, &ConstExpr::i32_const(*offset as i32), bytes); }
+    for (offset, bytes) in &strings.entries { data.active(0, &ConstExpr::i32_const(*offset as i32), bytes.iter().copied()); }
     let mut exports = ExportSection::new();
     exports.export("main", ExportKind::Func, 2 + program.functions.len() as u32);
     exports.export("memory", ExportKind::Memory, 0);
@@ -100,38 +99,14 @@ fn collect_locals_into(statements: &[Stmt], locals: &mut HashMap<String, u32>, c
 fn emit_statements(function: &mut Function, statements: &[Stmt], vars: &HashMap<String, u32>, consts: &HashSet<String>, signatures: &Signatures, in_function: bool, strings: &mut StringTable, loop_depth: usize, continue_depth: usize) -> Result<(), String> {
     for stmt in statements {
         match stmt {
-            Stmt::Let(name, expr) | Stmt::Const(name, expr) => { emit_expr(function, expr, vars, signatures, strings)?; let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`"))?; function.instruction(&Instruction::LocalSet(index)); }
-            Stmt::Assign(name, expr) => { if consts.contains(name) { return Err(format!("cannot assign to constant `{name}`")); } emit_expr(function, expr, vars, signatures, strings)?; let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`"))?; function.instruction(&Instruction::LocalSet(index)); }
-            Stmt::Print(expr) => match expr {
-                Expr::String(value) => { let offset = strings.intern(value); function.instruction(&Instruction::I32Const(offset as i32)); function.instruction(&Instruction::I32Const(value.len() as i32)); function.instruction(&Instruction::Call(1)); }
-                _ => { emit_expr(function, expr, vars, signatures, strings)?; function.instruction(&Instruction::Call(0)); }
-            },
+            Stmt::Let(name, expr) | Stmt::Const(name, expr) => { emit_expr(function, expr, vars, signatures, strings)?; let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`))?; function.instruction(&Instruction::LocalSet(index)); }
+            Stmt::Assign(name, expr) => { if consts.contains(name) { return Err(format!("cannot assign to constant `{name}`)); } emit_expr(function, expr, vars, signatures, strings)?; let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`))?; function.instruction(&Instruction::LocalSet(index)); }
+            Stmt::Print(expr) => match expr { Expr::String(value) => { let offset = strings.intern(value); function.instruction(&Instruction::I32Const(offset as i32)); function.instruction(&Instruction::I32Const(value.len() as i32)); function.instruction(&Instruction::Call(1)); }, _ => { emit_expr(function, expr, vars, signatures, strings)?; function.instruction(&Instruction::Call(0)); } },
             Stmt::Return(expr) => { if !in_function { return Err("`return` is only valid inside a function".into()); } emit_expr(function, expr, vars, signatures, strings)?; function.instruction(&Instruction::Return); }
             Stmt::If { condition, then_body, else_body } => { emit_expr(function, condition, vars, signatures, strings)?; function.instruction(&Instruction::If(BlockType::Empty)); emit_statements(function, then_body, vars, consts, signatures, in_function, strings, loop_depth, continue_depth)?; if !else_body.is_empty() { function.instruction(&Instruction::Else); emit_statements(function, else_body, vars, consts, signatures, in_function, strings, loop_depth, continue_depth)?; } function.instruction(&Instruction::End); }
             Stmt::While { condition, body } => { function.instruction(&Instruction::Block(BlockType::Empty)); function.instruction(&Instruction::Loop(BlockType::Empty)); emit_expr(function, condition, vars, signatures, strings)?; function.instruction(&Instruction::I32Eqz); function.instruction(&Instruction::BrIf(1)); emit_statements(function, body, vars, consts, signatures, in_function, strings, loop_depth + 1, 0)?; function.instruction(&Instruction::Br(0)); function.instruction(&Instruction::End); function.instruction(&Instruction::End); }
-            Stmt::For { name, start, end, step, body } => {
-                let step_value = match step { Expr::Number(n) if *n != 0 => *n, _ => return Err("`for` step must be a non-zero numeric literal".into()) };
-                let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`"))?;
-                emit_expr(function, start, vars, signatures, strings)?; function.instruction(&Instruction::LocalSet(index));
-                function.instruction(&Instruction::Block(BlockType::Empty)); function.instruction(&Instruction::Loop(BlockType::Empty));
-                function.instruction(&Instruction::LocalGet(index)); emit_expr(function, end, vars, signatures, strings)?;
-                if step_value > 0 { function.instruction(&Instruction::I32GtS); } else { function.instruction(&Instruction::I32LtS); }
-                function.instruction(&Instruction::I32Eqz); function.instruction(&Instruction::BrIf(1));
-                emit_statements(function, body, vars, consts, signatures, in_function, strings, loop_depth + 1, 0)?;
-                function.instruction(&Instruction::LocalGet(index)); function.instruction(&Instruction::I32Const(step_value)); function.instruction(&Instruction::I32Add); function.instruction(&Instruction::LocalSet(index));
-                function.instruction(&Instruction::Br(0)); function.instruction(&Instruction::End); function.instruction(&Instruction::End);
-            }
-            Stmt::Repeat { body, condition } => {
-                function.instruction(&Instruction::Block(BlockType::Empty));
-                function.instruction(&Instruction::Loop(BlockType::Empty));
-                function.instruction(&Instruction::Block(BlockType::Empty));
-                emit_statements(function, body, vars, consts, signatures, in_function, strings, loop_depth + 1, 1)?;
-                function.instruction(&Instruction::End);
-                emit_expr(function, condition, vars, signatures, strings)?;
-                function.instruction(&Instruction::BrIf(1));
-                function.instruction(&Instruction::Br(0));
-                function.instruction(&Instruction::End); function.instruction(&Instruction::End);
-            }
+            Stmt::For { name, start, end, step, body } => { let step_value = match step { Expr::Number(n) if *n != 0 => *n, _ => return Err("`for` step must be a non-zero numeric literal".into()) }; let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`))?; emit_expr(function, start, vars, signatures, strings)?; function.instruction(&Instruction::LocalSet(index)); function.instruction(&Instruction::Block(BlockType::Empty)); function.instruction(&Instruction::Loop(BlockType::Empty)); function.instruction(&Instruction::LocalGet(index)); emit_expr(function, end, vars, signatures, strings)?; if step_value > 0 { function.instruction(&Instruction::I32GtS); } else { function.instruction(&Instruction::I32LtS); } function.instruction(&Instruction::I32Eqz); function.instruction(&Instruction::BrIf(1)); emit_statements(function, body, vars, consts, signatures, in_function, strings, loop_depth + 1, 0)?; function.instruction(&Instruction::LocalGet(index)); function.instruction(&Instruction::I32Const(step_value)); function.instruction(&Instruction::I32Add); function.instruction(&Instruction::LocalSet(index)); function.instruction(&Instruction::Br(0)); function.instruction(&Instruction::End); function.instruction(&Instruction::End); }
+            Stmt::Repeat { body, condition } => { function.instruction(&Instruction::Block(BlockType::Empty)); function.instruction(&Instruction::Loop(BlockType::Empty)); function.instruction(&Instruction::Block(BlockType::Empty)); emit_statements(function, body, vars, consts, signatures, in_function, strings, loop_depth + 1, 1)?; function.instruction(&Instruction::End); emit_expr(function, condition, vars, signatures, strings)?; function.instruction(&Instruction::BrIf(1)); function.instruction(&Instruction::Br(0)); function.instruction(&Instruction::End); function.instruction(&Instruction::End); }
             Stmt::Do { body } => emit_statements(function, body, vars, consts, signatures, in_function, strings, loop_depth, continue_depth)?,
             Stmt::Break => { if loop_depth == 0 { return Err("`break` is only valid inside a loop".into()); } function.instruction(&Instruction::Br(loop_depth as u32)); }
             Stmt::Continue => { if loop_depth == 0 { return Err("`continue` is only valid inside a loop".into()); } function.instruction(&Instruction::Br(continue_depth as u32)); }
