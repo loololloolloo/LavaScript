@@ -6,4 +6,5 @@ while x > 0
     else
         print x
     end
+    x = x - 1
 end
