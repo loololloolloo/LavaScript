@@ -1,74 +1,55 @@
-use wasm_encoder::{
-    CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction,
-    Module, TypeSection, ValType,
-};
-
-const PRINT_TYPE: u32 = 0;
-const MAIN_TYPE: u32 = 1;
-const PRINT_FUNCTION: u32 = 0;
-const MAIN_FUNCTION: u32 = 1;
+use std::collections::HashMap;
+use wasm_encoder::{CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection, Instruction, Module, TypeSection, ValType};
+use crate::{lexer, parser::{self, Expr, Op, Stmt}};
 
 pub fn compile(source: &str) -> Result<Vec<u8>, String> {
+    let tokens = lexer::lex(source)?;
+    let program = parser::parse(&tokens)?;
     let mut module = Module::new();
-
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32], []);
     types.ty().function([], []);
-
     let mut imports = ImportSection::new();
-    imports.import(
-        "lavascript",
-        "print_i32",
-        wasm_encoder::EntityType::Function(PRINT_TYPE),
-    );
-
+    imports.import("lavascript", "print_i32", wasm_encoder::EntityType::Function(0));
     let mut functions = FunctionSection::new();
-    functions.function(MAIN_TYPE);
-
+    functions.function(1);
     let mut main = Function::new([]);
-    let mut found_statement = false;
-
-    for statement in source.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        if let Some(value) = statement.strip_prefix("print ") {
-            let value = value.trim().parse::<i32>().map_err(|_| {
-                format!("expected an integer after `print`, got `{value}`")
-            })?;
-            main.instruction(&Instruction::I32Const(value));
-            main.instruction(&Instruction::Call(PRINT_FUNCTION));
-            found_statement = true;
-        } else {
-            return Err(format!("unsupported statement: `{statement}`"));
+    let mut vars = HashMap::new();
+    for stmt in program {
+        match stmt {
+            Stmt::Let(name, expr) => { emit_expr(&mut main, &expr, &vars)?; vars.insert(name, ()); main.instruction(&Instruction::Drop); }
+            Stmt::Print(expr) => { emit_expr(&mut main, &expr, &vars)?; main.instruction(&Instruction::Call(0)); }
         }
     }
-
-    if !found_statement {
-        main.instruction(&Instruction::Nop);
-    }
     main.instruction(&Instruction::End);
-
     let mut code = CodeSection::new();
     code.function(&main);
-
     let mut exports = ExportSection::new();
-    exports.export("main", ExportKind::Func, MAIN_FUNCTION);
-
-    module
-        .section(&types)
-        .section(&imports)
-        .section(&functions)
-        .section(&exports)
-        .section(&code);
-
+    exports.export("main", ExportKind::Func, 1);
+    module.section(&types).section(&imports).section(&functions).section(&exports).section(&code);
     Ok(module.finish())
+}
+
+fn emit_expr(function: &mut Function, expr: &Expr, vars: &HashMap<String, ()>) -> Result<(), String> {
+    match expr {
+        Expr::Number(n) => function.instruction(&Instruction::I32Const(*n)),
+        Expr::Variable(name) => return Err(format!("variable `{name}` is not loadable yet")),
+        Expr::Binary(left, op, right) => {
+            emit_expr(function, left, vars)?;
+            emit_expr(function, right, vars)?;
+            function.instruction(match op { Op::Add => &Instruction::I32Add, Op::Sub => &Instruction::I32Sub, Op::Mul => &Instruction::I32Mul, Op::Div => &Instruction::I32DivS });
+        }
+    }
+    let _ = vars;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::compile;
-
     #[test]
-    fn emits_valid_wasm() {
-        let wasm = compile("print 42").unwrap();
+    fn parses_and_compiles_math() {
+        let wasm = compile("print 2 + 3 * 4").unwrap();
         wasmparser::Validator::new().validate_all(&wasm).unwrap();
     }
 }
