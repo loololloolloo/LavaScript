@@ -2,9 +2,11 @@ use std::{env, fs, process};
 
 mod checker;
 mod compiler;
+mod formatter;
 mod lexer;
 mod optimizer;
 mod parser;
+mod stdlib;
 mod value;
 
 fn usage() -> ! {
@@ -12,6 +14,7 @@ fn usage() -> ! {
     eprintln!("usage:");
     eprintln!("  lavascript build <file.ls> [-o <file.wasm>]");
     eprintln!("  lavascript check <file.ls>");
+    eprintln!("  lavascript fmt <file.ls> [-w]");
     process::exit(2);
 }
 
@@ -43,6 +46,16 @@ fn main() {
             if args.next().is_some() { eprintln!("too many arguments for `check`"); usage(); }
             load(&input);
             println!("ok: {input}");
+        }
+        Some("fmt") => {
+            let input = args.next().unwrap_or_else(|| usage());
+            let write = args.next().as_deref() == Some("-w");
+            if !write && args.next().is_some() { usage(); }
+            let (source, program) = load(&input);
+            let formatted = formatter::format_program(&program);
+            if write { fs::write(&input, formatted).unwrap_or_else(|e| { eprintln!("could not write {input}: {e}"); process::exit(1); }); }
+            else { print!("{formatted}"); }
+            let _ = source;
         }
         _ => usage(),
     }
