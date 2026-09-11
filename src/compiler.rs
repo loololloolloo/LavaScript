@@ -86,7 +86,7 @@ fn collect_locals_into(statements: &[Stmt], locals: &mut HashMap<String, u32>, c
         match stmt {
             Stmt::Let(name, _) => { if locals.contains_key(name) { return Err(format!("variable `{name}` is already declared")); } let index = locals.len() as u32; locals.insert(name.clone(), index); }
             Stmt::Const(name, _) => { if locals.contains_key(name) { return Err(format!("variable `{name}` is already declared")); } let index = locals.len() as u32; locals.insert(name.clone(), index); consts.insert(name.clone()); }
-            Stmt::Assign(name, _) => { if !locals.contains_key(name) { return Err(format!("undefined variable `{name}`")); } if consts.contains(name) { return Err(format!("cannot assign to constant `{name}`")); } }
+            Stmt::Assign(name, _) => { if !locals.contains_key(name) { return Err(format!("undefined variable `{name}`)); } if consts.contains(name) { return Err(format!("cannot assign to constant `{name}`)); } }
             Stmt::If { then_body, else_body, .. } => { collect_locals_into(then_body, locals, consts)?; collect_locals_into(else_body, locals, consts)?; }
             Stmt::While { body, .. } | Stmt::Repeat { body, .. } | Stmt::Do { body } => collect_locals_into(body, locals, consts)?,
             Stmt::For { name, body, .. } => { if !locals.contains_key(name) { let index = locals.len() as u32; locals.insert(name.clone(), index); } collect_locals_into(body, locals, consts)?; }
@@ -120,13 +120,13 @@ fn emit_expr(function: &mut Function, expr: &Expr, vars: &HashMap<String, u32>, 
         Expr::Number(n) => { function.instruction(&Instruction::I32Const(*n)); }
         Expr::Bool(value) => { function.instruction(&Instruction::I32Const(if *value { 1 } else { 0 })); }
         Expr::String(_) => return Err("string values can only be used with `print` for now".into()),
-        Expr::Variable(name) => { let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`"))?; function.instruction(&Instruction::LocalGet(index)); }
+        Expr::Variable(name) => { let index = *vars.get(name).ok_or_else(|| format!("undefined variable `{name}`))?; function.instruction(&Instruction::LocalGet(index)); }
         Expr::Binary(left, op, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(match op { Op::Add => &Instruction::I32Add, Op::Sub => &Instruction::I32Sub, Op::Mul => &Instruction::I32Mul, Op::Div => &Instruction::I32DivS, Op::Mod => &Instruction::I32RemS }); }
         Expr::Compare(left, op, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(match op { CompareOp::Eq => &Instruction::I32Eq, CompareOp::Ne => &Instruction::I32Ne, CompareOp::Lt => &Instruction::I32LtS, CompareOp::Le => &Instruction::I32LeS, CompareOp::Gt => &Instruction::I32GtS, CompareOp::Ge => &Instruction::I32GeS }); }
         Expr::Logical(left, LogicalOp::And, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(&Instruction::I32And); }
         Expr::Logical(left, LogicalOp::Or, right) => { emit_expr(function, left, vars, signatures, strings)?; emit_expr(function, right, vars, signatures, strings)?; function.instruction(&Instruction::I32Or); }
         Expr::Not(value) => { emit_expr(function, value, vars, signatures, strings)?; function.instruction(&Instruction::I32Eqz); }
-        Expr::Call(name, args) => { let &(index, arity) = signatures.get(name).ok_or_else(|| format!("undefined function `{name}`"))?; if args.len() != arity { return Err(format!("function `{name}` expects {arity} argument(s), got {}", args.len())); } for arg in args { emit_expr(function, arg, vars, signatures, strings)?; } function.instruction(&Instruction::Call(index)); }
+        Expr::Call(name, args) => { let &(index, arity) = signatures.get(name).ok_or_else(|| format!("undefined function `{name}`))?; if args.len() != arity { return Err(format!("function `{name}` expects {arity} argument(s), got {}", args.len())); } for arg in args { emit_expr(function, arg, vars, signatures, strings)?; } function.instruction(&Instruction::Call(index)); }
     }
     Ok(())
 }
