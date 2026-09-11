@@ -1,16 +1,22 @@
-use std::{env, fs, process};
+use std::{env, fs, path::Path, process};
 
 mod checker;
 mod compiler;
+mod formatter;
 mod lexer;
 mod optimizer;
 mod parser;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn usage() -> ! {
-    eprintln!("LavaScript compiler");
+    eprintln!("LavaScript {VERSION}");
     eprintln!("usage:");
     eprintln!("  lavascript build <file.ls> [-o <file.wasm>]");
     eprintln!("  lavascript check <file.ls>");
+    eprintln!("  lavascript fmt <file.ls> [-w]");
+    eprintln!("  lavascript init [directory]");
+    eprintln!("  lavascript version");
     process::exit(2);
 }
 
@@ -28,21 +34,27 @@ fn main() {
         Some("build") => {
             let input = args.next().unwrap_or_else(|| usage());
             let mut output = String::from("out.wasm");
-            while let Some(arg) = args.next() {
-                if arg == "-o" { output = args.next().unwrap_or_else(|| { eprintln!("missing output path after -o"); process::exit(2); }); }
-                else { eprintln!("unknown build option `{arg}`"); usage(); }
-            }
+            while let Some(arg) = args.next() { if arg == "-o" { output = args.next().unwrap_or_else(|| { eprintln!("missing output path after -o"); process::exit(2); }); } else { eprintln!("unknown build option `{arg}`"); usage(); } }
             let (source, _) = load(&input);
             let wasm = compiler::compile(&source).unwrap_or_else(|e| { eprintln!("compile error: {e}"); process::exit(1); });
             fs::write(&output, wasm).unwrap_or_else(|e| { eprintln!("could not write {output}: {e}"); process::exit(1); });
             println!("compiled {input} -> {output}");
         }
-        Some("check") => {
-            let input = args.next().unwrap_or_else(|| usage());
-            if args.next().is_some() { eprintln!("too many arguments for `check`"); usage(); }
-            load(&input);
-            println!("ok: {input}");
+        Some("check") => { let input=args.next().unwrap_or_else(||usage()); if args.next().is_some(){eprintln!("too many arguments for `check`");usage();} load(&input); println!("ok: {input}"); }
+        Some("fmt") => {
+            let input=args.next().unwrap_or_else(||usage()); let mut write_back=false;
+            while let Some(arg)=args.next(){if arg=="-w"||arg=="--write"{write_back=true}else{eprintln!("unknown fmt option `{arg}`");usage();}}
+            let (_,program)=load(&input); let formatted=formatter::format_program(&program);
+            if write_back {fs::write(&input,formatted).unwrap_or_else(|e|{eprintln!("could not write {input}: {e}");process::exit(1);});} else {print!("{formatted}");}
         }
+        Some("init") => {
+            let dir=args.next().unwrap_or_else(||".".into()); if args.next().is_some(){usage();}
+            let path=Path::new(&dir); fs::create_dir_all(path.join("src")).unwrap_or_else(|e|{eprintln!("could not create project: {e}");process::exit(1);});
+            let main=path.join("src/main.ls"); if !main.exists(){fs::write(&main,"print \"Hello, LavaScript!\"\n").unwrap_or_else(|e|{eprintln!("could not create project file: {e}");process::exit(1);});}
+            fs::write(path.join("LavaScript.toml"),"name = \"lavascript-project\"\nversion = \"0.1.0\"\nentry = \"src/main.ls\"\n").unwrap_or_else(|e|{eprintln!("could not create manifest: {e}");process::exit(1);});
+            println!("initialized LavaScript project in {}",path.display());
+        }
+        Some("version")|Some("--version")|Some("-V") => println!("LavaScript {VERSION}"),
         _ => usage(),
     }
 }
