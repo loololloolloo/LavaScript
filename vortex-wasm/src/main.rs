@@ -184,61 +184,61 @@ fn setup_start_overlay(mut commands: Commands) {
     commands.spawn(Camera2d);
     commands.spawn((
         Node {
-            width: percent(100),
-            height: percent(100),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
             position_type: PositionType::Absolute,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             flex_direction: FlexDirection::Column,
-            row_gap: px(14.0),
+            row_gap: Val::Px(14.0),
             ..default()
         },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
         StartOverlay,
-        children![
-            (
-                Text::new("VORTEX"),
-                TextFont {
-                    font_size: 42.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ),
-            (
-                Text::new("Click to start"),
-                TextFont {
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.8, 0.8, 0.8)),
-            ),
-            (
+    )).with_children(|parent| {
+        parent.spawn((
+            Text::new("VORTEX"),
+            TextFont {
+                font_size: 42.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+
+        parent.spawn((
+            Text::new("Click to start"),
+            TextFont {
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+        ));
+
+        parent
+            .spawn((
                 Button,
                 StartButton,
                 Node {
-                    width: px(230.0),
-                    height: px(64.0),
+                    width: Val::Px(230.0),
+                    height: Val::Px(64.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
-                    border: UiRect::all(px(2.0)),
-                    border_radius: BorderRadius::all(px(10.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
                     ..default()
                 },
                 BorderColor::all(Color::WHITE),
                 BackgroundColor(Color::srgb(0.12, 0.12, 0.12)),
-                children![
-                    (
-                        Text::new("CLICK TO START / LOCK MOUSE"),
-                        TextFont {
-                            font_size: 15.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ),
-                ],
-            ),
-        ],
-    ));
+            ))
+            .with_child((
+                Text::new("CLICK TO START / LOCK MOUSE"),
+                TextFont {
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+    });
 }
 
 fn start_overlay_input(
@@ -252,7 +252,7 @@ fn start_overlay_input(
         match *interaction {
             Interaction::Pressed => {
                 state.started = true;
-                *color = Color::srgb(0.2, 0.2, 0.2).into();
+                color.0 = Color::srgb(0.2, 0.2, 0.2);
                 resume_web_audio_context();
 
                 if let Ok(mut window) = windows.single_mut() {
@@ -265,10 +265,10 @@ fn start_overlay_input(
                 }
             }
             Interaction::Hovered => {
-                *color = Color::srgb(0.2, 0.2, 0.2).into();
+                color.0 = Color::srgb(0.2, 0.2, 0.2);
             }
             Interaction::None => {
-                *color = Color::srgb(0.12, 0.12, 0.12).into();
+                color.0 = Color::srgb(0.12, 0.12, 0.12);
             }
         }
     }
@@ -480,10 +480,10 @@ fn humanoid_controller(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Res<CameraState>,
-    mut runtime: ResMut<RuntimeState>,
+    mut state: ResMut<RuntimeState>,
     mut avatars: Query<(&mut Transform, &CapsuleController), With<VortexAvatar>>,
 ) {
-    if !runtime.started {
+    if !state.started {
         return;
     }
 
@@ -501,42 +501,42 @@ fn humanoid_controller(
     let right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
     let desired = (right * input.x + forward * input.y) * MAX_SPEED;
 
-    let was_grounded = runtime.grounded;
-    runtime.grounded = transform.translation.y <= capsule.half_height + 0.002;
+    let was_grounded = state.grounded;
+    state.grounded = transform.translation.y <= capsule.half_height + 0.002;
 
-    let accel = if runtime.grounded { GROUND_ACCEL } else { AIR_ACCEL };
-    runtime.velocity.x = approach(runtime.velocity.x, desired.x, accel * dt);
-    runtime.velocity.z = approach(runtime.velocity.z, desired.z, accel * dt);
+    let accel = if state.grounded { GROUND_ACCEL } else { AIR_ACCEL };
+    state.velocity.x = approach(state.velocity.x, desired.x, accel * dt);
+    state.velocity.z = approach(state.velocity.z, desired.z, accel * dt);
 
-    if input.length_squared() == 0.0 && runtime.grounded {
-        let horizontal = Vec3::new(runtime.velocity.x, 0.0, runtime.velocity.z);
+    if input.length_squared() == 0.0 && state.grounded {
+        let horizontal = Vec3::new(state.velocity.x, 0.0, state.velocity.z);
         let slowed = approach_vec3(horizontal, Vec3::ZERO, GROUND_FRICTION * dt);
-        runtime.velocity.x = slowed.x;
-        runtime.velocity.z = slowed.z;
+        state.velocity.x = slowed.x;
+        state.velocity.z = slowed.z;
     }
 
-    if runtime.grounded {
+    if state.grounded {
         transform.translation.y = capsule.half_height;
         if keyboard.just_pressed(KeyCode::Space) {
-            runtime.velocity.y = JUMP_SPEED;
-            runtime.grounded = false;
+            state.velocity.y = JUMP_SPEED;
+            state.grounded = false;
         } else {
-            runtime.velocity.y = -0.5;
+            state.velocity.y = -0.5;
         }
     } else {
-        runtime.velocity.y -= GRAVITY * dt;
+        state.velocity.y -= GRAVITY * dt;
     }
 
-    transform.translation += runtime.velocity * dt;
+    transform.translation += state.velocity * dt;
 
     let floor_y = capsule.half_height;
     if transform.translation.y <= floor_y {
         transform.translation.y = floor_y;
-        runtime.velocity.y = 0.0;
-        runtime.grounded = true;
+        state.velocity.y = 0.0;
+        state.grounded = true;
     }
 
-    let horizontal_velocity = Vec3::new(runtime.velocity.x, 0.0, runtime.velocity.z);
+    let horizontal_velocity = Vec3::new(state.velocity.x, 0.0, state.velocity.z);
     if horizontal_velocity.length_squared() > 0.01 {
         let target_yaw = horizontal_velocity.x.atan2(-horizontal_velocity.z);
         let (_, current_yaw, _) = transform.rotation.to_euler(EulerRot::YXZ);
@@ -567,45 +567,44 @@ fn follow_third_person_camera(
 }
 
 fn update_avatar_animation(
+    time: Res<Time>,
     state: Res<RuntimeState>,
-    mut players: Query<(
+    mut avatars: Query<(
+        &mut AvatarAnimationState,
         &mut AnimationPlayer,
         &mut AnimationTransitions,
-        &mut AvatarAnimationState,
     )>,
 ) {
-    if !state.started {
-        return;
-    }
+    let Ok((mut animation_state, mut player, mut transitions)) = avatars.single_mut() else { return; };
 
-    let speed = Vec3::new(state.velocity.x, 0.0, state.velocity.z).length();
-    let desired = if !state.grounded {
+    let horizontal_speed = Vec2::new(state.velocity.x, state.velocity.z).length();
+    let next_state = if !state.grounded {
         if state.velocity.y > 0.0 {
             VortexAnimationState::Jump
         } else {
             VortexAnimationState::Fall
         }
-    } else if speed > 0.25 {
+    } else if horizontal_speed > 0.1 {
         VortexAnimationState::Run
     } else {
         VortexAnimationState::Idle
     };
 
-    for (mut player, mut transitions, mut animation_state) in &mut players {
-        if animation_state.current == desired {
-            continue;
-        }
-
-        let node = match desired {
-            VortexAnimationState::Idle => animation_state.idle,
-            VortexAnimationState::Run => animation_state.run,
-            VortexAnimationState::Jump => animation_state.jump,
-            VortexAnimationState::Fall => animation_state.fall,
-        };
-
-        transitions
-            .play(&mut player, node, ANIMATION_CROSSFADE)
-            .repeat();
-        animation_state.current = desired;
+    if next_state == animation_state.current {
+        return;
     }
+
+    let node = match next_state {
+        VortexAnimationState::Idle => animation_state.idle,
+        VortexAnimationState::Run => animation_state.run,
+        VortexAnimationState::Jump => animation_state.jump,
+        VortexAnimationState::Fall => animation_state.fall,
+    };
+
+    transitions
+        .play(&mut player, node, ANIMATION_CROSSFADE)
+        .repeat();
+    animation_state.current = next_state;
+
+    let _ = time.delta_secs();
 }
