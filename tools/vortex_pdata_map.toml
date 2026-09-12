@@ -1,0 +1,50 @@
+# Function-boundary mapping scaffold for Vortex v0.5.3.
+# `start` and `end` are image-relative RVAs from the x64 .pdata runtime-function table.
+# Keep evidence separate from hypotheses: a recovered Rust path is not by itself proof
+# that the entire function range belongs to that subsystem.
+
+[image]
+executable = "Vortex/Vortex.exe"
+image_base = "0x140000000"
+architecture = "x86_64"
+
+[[mapping]]
+name = "bevy_scheduler_candidate"
+start = ""
+end = ""
+source = "embedded-symbol-path"
+confidence = "unmapped"
+notes = "Populate only after correlating a .pdata range with a recovered Bevy schedule/system symbol or call-site evidence."
+
+[[mapping]]
+name = "vortex_game_plugin_candidate"
+start = ""
+end = ""
+source = "embedded-symbol-path"
+confidence = "unmapped"
+notes = "Target vortex_engine::GamePlugin and nearby startup/plugin registration code."
+
+[[mapping]]
+name = "vortex_player_candidate"
+start = ""
+end = ""
+source = "embedded-symbol-path"
+confidence = "unmapped"
+notes = "Target vortex_engine::Player and physics::Humanoid behavior."
+
+[[mapping]]
+name = "vortex_network_candidate"
+start = ""
+end = ""
+source = "network-string-xref"
+confidence = "unmapped"
+notes = "Target code associated with connect.playvortex.io:7777; browser transport must be established from recovered protocol evidence."
+
+[method]
+# Recommended evidence order:
+# 1. .pdata RuntimeFunction begin/end RVAs
+# 2. unwind metadata / prologue characteristics
+# 3. xref locations for embedded Rust path strings
+# 4. nearby constants and call targets
+# 5. known Bevy 0.19.1 symbol/source-path signatures
+# 6. subsystem assignment only after corroboration
