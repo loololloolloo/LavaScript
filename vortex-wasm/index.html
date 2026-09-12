@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vortex WASM</title>
+<style>html,body{margin:0;height:100%;background:#080b10;color:#fff;font:14px system-ui}canvas{display:block;width:100%;height:100%;outline:0}#hud{position:fixed;top:12px;left:12px;padding:8px 10px;background:#0009;border:1px solid #ffffff22;border-radius:8px;pointer-events:none}</style>
+</head>
+<body>
+<div id="hud">VORTEX WASM — loading</div>
+<canvas id="game" tabindex="0"></canvas>
+<script type="module">
+const canvas=document.querySelector('#game'), hud=document.querySelector('#hud');
+const ctx=canvas.getContext('2d');
+let keys=new Set(), x=0,y=0,last=performance.now(),frames=0;
+addEventListener('keydown',e=>keys.add(e.code)); addEventListener('keyup',e=>keys.delete(e.code)); canvas.focus();
+function resize(){canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0)} addEventListener('resize',resize); resize();
+function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now; const speed=260;
+ if(keys.has('KeyW'))y-=speed*dt;if(keys.has('KeyS'))y+=speed*dt;if(keys.has('KeyA'))x-=speed*dt;if(keys.has('KeyD'))x+=speed*dt;
+ const w=innerWidth,h=innerHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#101722';ctx.fillRect(0,0,w,h);
+ ctx.strokeStyle='#1d2938';for(let gx=((w/2+x)%50+50)%50;gx<w;gx+=50){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,h);ctx.stroke()}for(let gy=((h/2+y)%50+50)%50;gy<h;gy+=50){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(w,gy);ctx.stroke()}
+ ctx.fillStyle='#56b4ff';ctx.beginPath();ctx.arc(w/2,h/2,22,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('Vortex player',w/2,h/2-34);
+ frames++;hud.textContent=`VORTEX WASM — playable prototype | WASD | ${frames} frames`;requestAnimationFrame(loop)} requestAnimationFrame(loop);
+</script>
+</body></html>
