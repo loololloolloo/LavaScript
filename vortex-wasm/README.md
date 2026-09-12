@@ -1,21 +1,42 @@
-# Vortex WASM reconstruction
+# Vortex WASM port
 
-This directory is the browser-side reconstruction track for Vortex.
+This directory is the active browser-port track for the supplied `Vortex.exe` binary.
 
-The first milestone is deliberately small: a browser-hosted playable movement shell that establishes the input/render/update loop without pretending the original Windows PE can execute directly in a browser.
+The target is the original Vortex runtime and recovered assets, not a visual recreation.
 
-## Current controls
+## Runtime
 
-- `WASD` moves the player
-- browser canvas is the render surface
-- the update loop runs independently of the Windows executable
+- Bevy `0.19.1`
+- `wasm32-unknown-unknown`
+- Bevy's native browser window/render integration
+- HTML canvas selector: `#vortex-canvas`
+- Asset metadata disabled because extracted assets are runtime artifacts rather than `.meta`-managed project files
 
-## Next milestones
+## Actual recovered asset path
 
-1. Replace the 2D shell with a WebGPU/Bevy scene.
-2. Port the recovered player/entity state.
-3. Add camera and humanoid movement.
-4. Add physics/collision.
-5. Integrate recovered assets/materials.
-6. Add browser-compatible networking.
-7. Reach a representative playable Vortex game scene.
+The supplied executable contains the R7 GLB hierarchy. The extraction pipeline writes the recovered model to:
+
+```text
+vortex-wasm/assets/vortex-r7.glb
+```
+
+The Bevy entry point loads that file with `AssetServer` and spawns glTF scene 0. No procedural avatar geometry is used by the runtime.
+
+## Browser build
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli
+cargo build --release --target wasm32-unknown-unknown
+wasm-bindgen target/wasm32-unknown-unknown/release/vortex_wasm.wasm --target web --out-dir dist
+```
+
+Copy the generated `vortex-wasm/assets` directory into the web server's `dist/assets` directory and serve `dist` over HTTP(S).
+
+## Important asset boundary
+
+The repository contains the extraction tooling, not an assumed copy of proprietary binary assets. Run the extractor against the supplied executable to materialize the actual GLB/KTX2/Ogg resources locally before packaging the browser build.
+
+## Reverse-engineering track
+
+`tools/vortex_pdata.py` enumerates x64 exception/unwind ranges from `.pdata`. The next mapping pass correlates those ranges with embedded Rust/Bevy symbol-like strings and source-path markers recovered from the executable. The goal is to separate Bevy framework functions from Vortex gameplay functions before porting behavior.
