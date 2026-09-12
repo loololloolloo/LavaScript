@@ -1,0 +1,80 @@
+name: Build Vortex WASM
+
+on:
+  push:
+    branches:
+      - vortex-wasm-re
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-wasm:
+    name: Build Vortex WASM bundle
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: vortex-wasm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vortex-wasm/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('vortex-wasm/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.104 --locked
+
+      - name: Build release WASM
+        run: cargo build --release --target wasm32-unknown-unknown
+
+      - name: Assemble dist bundle
+        run: |
+          set -eux
+          rm -rf dist
+          mkdir -p dist/assets
+
+          wasm-bindgen \
+            target/wasm32-unknown-unknown/release/vortex_wasm.wasm \
+            --target web \
+            --out-dir dist
+
+          cp index.html dist/index.html
+
+          if [ -d assets ]; then
+            cp -R assets/. dist/assets/
+          fi
+
+          test -f dist/index.html
+          test -f dist/vortex_wasm.js
+          test -f dist/vortex_wasm_bg.wasm
+
+      - name: Create distributable archive
+        run: |
+          set -eux
+          cd dist
+          zip -r ../vortex-wasm-dist.zip .
+
+      - name: Upload Vortex WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vortex-wasm-dist
+          path: vortex-wasm/vortex-wasm-dist.zip
+          if-no-files-found: error
+          retention-days: 14
