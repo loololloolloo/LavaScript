@@ -10,5 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all -- --check
       - run: cargo test
       - run: cargo run -- build examples/hello.ls -o hello.wasm
+      - run: cargo run -- check examples/hello.ls
+      - run: cargo run -- version
