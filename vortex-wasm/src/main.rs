@@ -350,7 +350,7 @@ fn spawn_recovered_avatar(
     asset_server: Res<AssetServer>,
     manifest_handle: Res<ManifestHandle>,
     manifests: Res<Assets<VortexManifest>>,
-    mut gltf_handle: Option<ResMut<AvatarGltfHandle>>,
+    gltf_handle: Option<Res<AvatarGltfHandle>>,
     gltfs: Res<Assets<Gltf>>,
     mut state: ResMut<RuntimeState>,
 ) {
@@ -368,11 +368,12 @@ fn spawn_recovered_avatar(
         .strip_prefix("vortex-wasm/assets/")
         .unwrap_or(&entry.path);
 
-    let Some(current_handle) = gltf_handle.as_deref() else { return; };
-    if gltfs.get(current_handle) .is_none() {
-        if let Some(mut handle) = gltf_handle {
-            *handle = asset_server.load::<Gltf>(path);
-        }
+    let Some(current_handle) = gltf_handle else {
+        commands.insert_resource(AvatarGltfHandle(asset_server.load::<Gltf>(path)));
+        return;
+    };
+
+    if gltfs.get(&current_handle.0).is_none() {
         return;
     }
 
