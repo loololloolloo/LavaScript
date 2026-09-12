@@ -1,44 +1,6 @@
 use std::fmt::Write;
-use crate::parser::{Expr, LogicalOp, Op, Program, Stmt, CompareOp};
-
-pub fn format_program(program: &Program) -> String {
-    let mut out = String::new();
-    for f in &program.functions {
-        writeln!(&mut out, "function {}({})", f.name, f.params.join(", ")).unwrap();
-        write_stmts(&mut out, &f.body, 1);
-        writeln!(&mut out, "end").unwrap();
-        writeln!(&mut out).unwrap();
-    }
-    write_stmts(&mut out, &program.main, 0);
-    while out.ends_with("\n\n") { out.pop(); }
-    out
-}
-
-fn write_stmts(out: &mut String, stmts: &[Stmt], depth: usize) {
-    for s in stmts {
-        let pad = "    ".repeat(depth);
-        match s {
-            Stmt::Let(n,e) => writeln!(out, "{pad}let {n} = {}", expr(e)).unwrap(),
-            Stmt::Const(n,e) => writeln!(out, "{pad}const {n} = {}", expr(e)).unwrap(),
-            Stmt::Assign(n,e) => writeln!(out, "{pad}{n} = {}", expr(e)).unwrap(),
-            Stmt::Print(e) => writeln!(out, "{pad}print {}", expr(e)).unwrap(),
-            Stmt::Return(e) => writeln!(out, "{pad}return {}", expr(e)).unwrap(),
-            Stmt::Break => writeln!(out, "{pad}break").unwrap(),
-            Stmt::Continue => writeln!(out, "{pad}continue").unwrap(),
-            Stmt::If{condition,then_body,else_body} => { writeln!(out, "{pad}if {} then",expr(condition)).unwrap(); write_stmts(out,then_body,depth+1); if !else_body.is_empty(){writeln!(out,"{pad}else").unwrap();write_stmts(out,else_body,depth+1);} writeln!(out,"{pad}end").unwrap(); },
-            Stmt::While{condition,body} => { writeln!(out,"{pad}while {}",expr(condition)).unwrap();write_stmts(out,body,depth+1);writeln!(out,"{pad}end").unwrap(); },
-            Stmt::For{name,start,end,step,body} => { writeln!(out,"{pad}for {name} = {}, {}, {}",expr(start),expr(end),expr(step)).unwrap();write_stmts(out,body,depth+1);writeln!(out,"{pad}end").unwrap(); },
-            Stmt::Repeat{body,condition} => { writeln!(out,"{pad}repeat").unwrap();write_stmts(out,body,depth+1);writeln!(out,"{pad}until {}",expr(condition)).unwrap(); },
-            Stmt::Do{body} => { writeln!(out,"{pad}do").unwrap();write_stmts(out,body,depth+1);writeln!(out,"{pad}end").unwrap(); },
-        }
-    }
-}
-
-fn expr(e: &Expr) -> String { match e {
-    Expr::Number(n)=>n.to_string(), Expr::Bool(v)=>v.to_string(), Expr::String(s)=>format!("\"{}\"",s.replace('\\','\\\\').replace('"','\\"').replace('\n','\\n')),
-    Expr::Variable(n)=>n.clone(), Expr::Binary(a,o,b)=>format!("({} {} {})",expr(a),op(o),expr(b)),
-    Expr::Compare(a,o,b)=>format!("({} {} {})",expr(a),cmp(o),expr(b)), Expr::Logical(a,o,b)=>format!("({} {} {})",expr(a),if matches!(o,LogicalOp::And){"and"}else{"or"},expr(b)),
-    Expr::Not(a)=>format!("not {}",expr(a)), Expr::Call(n,args)=>format!("{}({})",n,args.iter().map(expr).collect::<Vec<_>>().join(", ")),
-}}
-fn op(o:&Op)->&'static str{match o{Op::Add=>"+",Op::Sub=>"-",Op::Mul=>"*",Op::Div=>"/",Op::Mod=>"%"}}
-fn cmp(o:&CompareOp)->&'static str{match o{CompareOp::Eq=>"==",CompareOp::Ne=>"!=",CompareOp::Lt=>"<",CompareOp::Le=>"<=",CompareOp::Gt=>">",CompareOp::Ge=>">="}}
+use crate::parser::{CompareOp,Expr,LogicalOp,Op,Program,Stmt};
+pub fn format_program(p:&Program)->String{let mut o=String::new();for f in &p.functions{writeln!(&mut o,"function {}({})",f.name,f.params.join(", ")).unwrap();write_stmts(&mut o,&f.body,1);writeln!(&mut o,"end\n").unwrap();}write_stmts(&mut o,&p.main,0);while o.ends_with("\n\n"){o.pop()}o}
+fn write_stmts(o:&mut String,ss:&[Stmt],d:usize){for s in ss{let p="    ".repeat(d);match s{Stmt::Let(n,e)=>writeln!(o,"{p}let {n} = {}",expr(e)).unwrap(),Stmt::Const(n,e)=>writeln!(o,"{p}const {n} = {}",expr(e)).unwrap(),Stmt::Assign(n,e)=>writeln!(o,"{p}{n} = {}",expr(e)).unwrap(),Stmt::SetIndex(a,i,e)=>writeln!(o,"{p}{}[{}] = {}",expr(a),expr(i),expr(e)).unwrap(),Stmt::SetProperty(a,n,e)=>writeln!(o,"{p}{}.{} = {}",expr(a),n,expr(e)).unwrap(),Stmt::Print(e)=>writeln!(o,"{p}print {}",expr(e)).unwrap(),Stmt::Return(e)=>writeln!(o,"{p}return {}",expr(e)).unwrap(),Stmt::Break=>writeln!(o,"{p}break").unwrap(),Stmt::Continue=>writeln!(o,"{p}continue").unwrap(),Stmt::If{condition,then_body,else_body}=>{writeln!(o,"{p}if {} then",expr(condition)).unwrap();write_stmts(o,then_body,d+1);if !else_body.is_empty(){writeln!(o,"{p}else").unwrap();write_stmts(o,else_body,d+1)}writeln!(o,"{p}end").unwrap()},Stmt::While{condition,body}=>{writeln!(o,"{p}while {}",expr(condition)).unwrap();write_stmts(o,body,d+1);writeln!(o,"{p}end").unwrap()},Stmt::For{name,start,end,step,body}=>{writeln!(o,"{p}for {name} = {}, {}, {}",expr(start),expr(end),expr(step)).unwrap();write_stmts(o,body,d+1);writeln!(o,"{p}end").unwrap()},Stmt::Repeat{body,condition}=>{writeln!(o,"{p}repeat").unwrap();write_stmts(o,body,d+1);writeln!(o,"{p}until {}",expr(condition)).unwrap()},Stmt::Do{body}=>{writeln!(o,"{p}do").unwrap();write_stmts(o,body,d+1);writeln!(o,"{p}end").unwrap()}}}}
+fn expr(e:&Expr)->String{match e{Expr::Number(n)=>n.to_string(),Expr::Bool(v)=>v.to_string(),Expr::String(s)=>format!("\"{}\"",s.replace('\\','\\\\').replace('"','\\"').replace('\n','\\n')),Expr::Nil=>"nil".into(),Expr::Variable(n)=>n.clone(),Expr::Array(a)=>format!("[{}]",a.iter().map(expr).collect::<Vec<_>>().join(", ")),Expr::Table(a)=>format!("{{{}}}",a.iter().map(|(k,v)|format!("{}: {}",k,expr(v))).collect::<Vec<_>>().join(", ")),Expr::Binary(a,o,b)=>format!("({} {} {})",expr(a),op(o),expr(b)),Expr::Compare(a,o,b)=>format!("({} {} {})",expr(a),cmp(o),expr(b)),Expr::Logical(a,o,b)=>format!("({} {} {})",expr(a),if matches!(o,LogicalOp::And){"and"}else{"or"},expr(b)),Expr::Not(a)=>format!("not {}",expr(a)),Expr::Call(n,a)=>format!("{}({})",n,a.iter().map(expr).collect::<Vec<_>>().join(", ")),Expr::Index(a,i)=>format!("{}[{}]",expr(a),expr(i)),Expr::Property(a,n)=>format!("{}.{}",expr(a),n),Expr::Method(a,n,x)=>format!("{}.{}({})",expr(a),n,x.iter().map(expr).collect::<Vec<_>>().join(", "))}}
+fn op(o:&Op)->&'static str{match o{Op::Add=>"+",Op::Sub=>"-",Op::Mul=>"*",Op::Div=>"/",Op::Mod=>"%"}}fn cmp(o:&CompareOp)->&'static str{match o{CompareOp::Eq=>"==",CompareOp::Ne=>"!=",CompareOp::Lt=>"<",CompareOp::Le=>"<=",CompareOp::Gt=>">",CompareOp::Ge=>">="}}
