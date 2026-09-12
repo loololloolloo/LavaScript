@@ -1,41 +1,39 @@
 # Vortex asset recovery
 
-The browser client must use recovered Vortex data rather than invented replacements.
+The browser target is intended to use **the actual data embedded in the supplied Vortex client**, not substitute assets designed to resemble it.
 
-Static analysis of the supplied `Vortex/Vortex.exe` found embedded self-describing assets, including:
+## Confirmed embedded data
 
-- GLB/glTF 2.0 avatar models
+Static scanning of the supplied `Vortex/Vortex.exe` found embedded binary payloads with the signatures of:
+
+- GLB/glTF 2.0 models
 - PNG textures
-- Ogg audio streams
-- RIFF media
+- Ogg audio
 - KTX2 textures
 
-The strongest confirmed GLB at offset `115472112` is 79,456 bytes and contains the actual Vortex R7 avatar mesh set:
-
-- `R7Head`
-- `R7LArm`
-- `R7LLeg`
-- `R7RArm`
-- `R7RLeg`
-- `R7Torso.001`
-- `R7Body`
-
-Its node hierarchy also contains `Right Arm`, `Left Arm`, `Right Leg`, `Left Leg`, `Head`, `Torso`, `HumanoidRootPart`, `Armature.001`, and `Body`.
-
-Additional valid GLB containers were found at executable offsets `115551578`, `137782874`, `138130716`, `138152916`, and `138178548`.
+The recovered GLB JSON contains Vortex-specific avatar nodes including `HumanoidRootPart`, `Torso`, `Right Arm`, `Left Arm`, `Right Leg`, `Left Leg`, `R7Head`, `R7LArm`, `R7LLeg`, `R7RArm`, `R7RLeg`, `R7Torso`, and `R7Body`.
 
 ## Extraction
 
-Run the read-only extractor against the supplied executable:
+Run the extractor against the original executable:
 
 ```bash
-python3 tools/vortex_extract_assets.py /path/to/Vortex/Vortex.exe
+python3 tools/extract_vortex_assets.py /path/to/Vortex/Vortex.exe
 ```
 
-It writes recovered containers into `vortex-wasm/assets/` and creates `manifest.json` with offsets, sizes, and SHA-256 hashes.
+It writes recovered payloads to `vortex-wasm/assets/recovered/` and creates a `manifest.json` containing source offsets and sizes.
 
-## Porting rule
+The extractor is read-only with respect to the executable. It uses the native container formats to determine asset boundaries instead of blindly slicing between magic signatures.
 
-Do not replace recovered Vortex models, materials, animation data, or assets with lookalikes when the original data can be recovered. The browser runtime should progressively consume the recovered data and reconstructed behavior.
+## Integration target
 
-The current primitive world renderer is only a temporary harness for validating browser input/rendering. It is not considered the Vortex implementation milestone.
+The recovered assets need to become the browser client's real asset inputs:
+
+1. load the recovered GLB avatar instead of placeholder geometry;
+2. preserve the original node/skeleton names and animation clips;
+3. load recovered textures/material inputs;
+4. reproduce the Vortex material/shader behavior from the embedded WGSL;
+5. connect those assets to the recovered `Player`/`Humanoid` state;
+6. replace native-only APIs with browser equivalents while preserving gameplay semantics.
+
+The existing WebGL scene is only a bootstrap harness until the recovered Vortex data is wired in. The goal is to port Vortex itself, not make a visual recreation.
