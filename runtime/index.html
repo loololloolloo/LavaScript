@@ -1,47 +1,26 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>LavaScript WebAssembly Runtime</title>
-</head>
-<body>
-  <h1>LavaScript</h1>
-  <p>WebAssembly runtime demo. Build an <code>out.wasm</code> module and place it beside this file.</p>
-  <pre id="output"></pre>
-  <script>
-    const output = document.getElementById("output");
-    let wasmInstance = null;
-
-    const imports = {
-      lavascript: {
-        print_i32(value) {
-          output.textContent += `${value}\n`;
-          console.log(value);
-        },
-        print_string(ptr, len) {
-          if (!wasmInstance) throw new Error("Wasm instance is not ready");
-          const bytes = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
-          const text = new TextDecoder().decode(bytes);
-          output.textContent += `${text}\n`;
-          console.log(text);
-        }
-      }
-    };
-
-    async function run() {
-      try {
-        const result = await WebAssembly.instantiateStreaming(fetch("out.wasm"), imports);
-        wasmInstance = result.instance;
-        if (typeof wasmInstance.exports.main !== "function") throw new Error("Wasm module does not export main");
-        wasmInstance.exports.main();
-      } catch (error) {
-        output.textContent = `Runtime error: ${error}`;
-        console.error(error);
-      }
-    }
-
-    run();
-  </script>
-</body>
-</html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LavaScript Runtime</title></head>
+<body><h1>LavaScript</h1><pre id="output"></pre>
+<script>
+const output=document.getElementById('output');let instance=null;let next=1;const values=new Map();
+function put(v){const id=-next++;values.set(id,v);return id}function get(v){return values.get(v)}
+const imports={lavascript:{
+ print_value(v){const x=get(v);output.textContent+=(x===undefined?(v===0?'nil':String(v)):format(x))+'\n';},
+ make_string(ptr,len){const b=new Uint8Array(instance.exports.memory.buffer,ptr,len);return put(new TextDecoder().decode(b));},
+ string_concat(a,b){return put(String(get(a))+String(get(b)));},
+ string_len(v){return String(get(v)).length;},
+ array_new(n){return put(new Array(n).fill(0));},
+ array_get(a,i){const x=get(a);return x[Math.trunc(i)]??0;},
+ array_set(a,i,v){const x=get(a);x[Math.trunc(i)]=v;},
+ array_push(a,v){get(a).push(v);},
+ array_pop(a){return get(a).pop()??0;},
+ table_new(){return put(Object.create(null));},
+ table_get(t,k){const o=get(t),key=String(get(k));return o[key]??0;},
+ table_set(t,k,v){get(t)[String(get(k))]=v;},
+ value_type(v){const x=get(v);if(x===undefined)return v===0?put('nil'):put('number');if(Array.isArray(x))return put('array');if(typeof x==='string')return put('string');if(x&&typeof x==='object')return put('table');return put(typeof x);},
+ abs(v){return Math.abs(v);},min(a,b){return Math.min(a,b);},max(a,b){return Math.max(a,b);},assert(v){if(!v)throw new Error('assertion failed');}
+}};
+function format(v){if(Array.isArray(v))return '['+v.map(format).join(', ')+']';if(v&&typeof v==='object')return '{'+Object.entries(v).map(([k,x])=>k+': '+format(x)).join(', ')+'}';return String(v)}
+async function run(){try{const r=await WebAssembly.instantiateStreaming(fetch('out.wasm'),imports);instance=r.instance;if(typeof instance.exports.main!=='function')throw Error('module does not export main');instance.exports.main();}catch(e){output.textContent='Runtime error: '+e;console.error(e)}}run();
+</script></body></html>
