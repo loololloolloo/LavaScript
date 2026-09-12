@@ -11,7 +11,8 @@ struct R7Scene(Handle<Scene>);
 #[derive(Component)]
 struct VortexAvatarRoot;
 
-fn main() {
+#[wasm_bindgen(start)]
+pub fn start_vortex() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -57,9 +58,4 @@ fn keep_avatar_grounded(
     for mut transform in &mut roots {
         transform.translation.y = 0.0;
     }
-}
-
-#[wasm_bindgen]
-pub fn start_vortex() {
-    main();
 }
