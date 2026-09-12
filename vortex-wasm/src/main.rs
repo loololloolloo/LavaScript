@@ -1,6 +1,7 @@
 mod manifest;
 
 use bevy::asset::AssetPlugin;
+use bevy::gltf::{Gltf, GltfAssetLabel};
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
@@ -58,7 +59,7 @@ struct CapsuleController {
     half_height: f32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum VortexAnimationState {
     Idle,
     Run,
@@ -161,8 +162,6 @@ pub fn start_vortex() {
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let gltf_handle = asset_server.load::<Gltf>("avatar.glb");
-    commands.insert_resource(AvatarGltfHandle(gltf_handle));
     commands.insert_resource(ManifestHandle(asset_server.load(MANIFEST)));
 
     commands.spawn((
@@ -278,11 +277,12 @@ fn start_overlay_input(
 fn build_animation_library(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    gltf_handle: Res<AvatarGltfHandle>,
+    gltf_handle: Option<Res<AvatarGltfHandle>>,
     gltfs: Res<Assets<Gltf>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     library: Option<Res<VortexAnimationLibrary>>,
 ) {
+    let Some(gltf_handle) = gltf_handle else { return; };
     if library.is_some() || !asset_server.is_loaded_with_dependencies(&gltf_handle.0) {
         return;
     }
@@ -327,20 +327,22 @@ fn choose_animation_for_state(state: VortexAnimationState, names: &[String]) -> 
         VortexAnimationState::Fall => &["fall", "falling", "air", "airborne", "descend"],
     };
 
-    names.iter().max_by_key(|name| {
-        let lower = name.to_ascii_lowercase();
-        keywords
-            .iter()
-            .enumerate()
-            .filter(|(_, keyword)| lower.contains(**keyword))
-            .map(|(index, keyword)| 1000 - index as i32 * 10 + keyword.len() as i32)
-            .max()
-            .unwrap_or(0)
-    })
-    .filter(|name| {
-        let lower = name.to_ascii_lowercase();
-        keywords.iter().any(|keyword| lower.contains(keyword))
-    })
+    names
+        .iter()
+        .max_by_key(|name| {
+            let lower = name.to_ascii_lowercase();
+            keywords
+                .iter()
+                .enumerate()
+                .filter(|(_, keyword)| lower.contains(**keyword))
+                .map(|(index, keyword)| 1000 - index as i32 * 10 + keyword.len() as i32)
+                .max()
+                .unwrap_or(0)
+        })
+        .filter(|name| {
+            let lower = name.to_ascii_lowercase();
+            keywords.iter().any(|keyword| lower.contains(keyword))
+        })
 }
 
 fn spawn_recovered_avatar(
@@ -348,8 +350,8 @@ fn spawn_recovered_avatar(
     asset_server: Res<AssetServer>,
     manifest_handle: Res<ManifestHandle>,
     manifests: Res<Assets<VortexManifest>>,
+    mut gltf_handle: Option<ResMut<AvatarGltfHandle>>,
     gltfs: Res<Assets<Gltf>>,
-    gltf_handle: Res<AvatarGltfHandle>,
     mut state: ResMut<RuntimeState>,
 ) {
     if state.avatar_spawned {
@@ -361,20 +363,19 @@ fn spawn_recovered_avatar(
         entry.format == "glb" && entry.classification == "vortex-r7-avatar"
     }) else { return; };
 
-    if gltfs.get(&gltf_handle.0).is_none() {
-        let path = entry
-            .path
-            .strip_prefix("vortex-wasm/assets/")
-            .unwrap_or(&entry.path);
-        let loaded = asset_server.load::<Gltf>(path);
-        commands.insert_resource(AvatarGltfHandle(loaded));
-        return;
-    }
-
     let path = entry
         .path
         .strip_prefix("vortex-wasm/assets/")
         .unwrap_or(&entry.path);
+
+    let Some(current_handle) = gltf_handle.as_deref() else { return; };
+    if gltfs.get(current_handle) .is_none() {
+        if let Some(mut handle) = gltf_handle {
+            *handle = asset_server.load::<Gltf>(path);
+        }
+        return;
+    }
+
     let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
 
     commands.spawn((
@@ -478,11 +479,10 @@ fn humanoid_controller(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Res<CameraState>,
-    state: Res<RuntimeState>,
-    mut avatars: Query<(&mut Transform, &CapsuleController), With<VortexAvatar>>,
     mut runtime: ResMut<RuntimeState>,
+    mut avatars: Query<(&mut Transform, &CapsuleController), With<VortexAvatar>>,
 ) {
-    if !state.started {
+    if !runtime.started {
         return;
     }
 
