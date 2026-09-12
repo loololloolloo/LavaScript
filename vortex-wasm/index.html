@@ -1,24 +1,11 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Vortex WASM</title>
-<style>html,body{margin:0;height:100%;background:#080b10;color:#fff;font:14px system-ui}canvas{display:block;width:100%;height:100%;outline:0}#hud{position:fixed;top:12px;left:12px;padding:8px 10px;background:#0009;border:1px solid #ffffff22;border-radius:8px;pointer-events:none}</style>
-</head>
-<body>
-<div id="hud">VORTEX WASM — loading</div>
-<canvas id="game" tabindex="0"></canvas>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vortex WASM</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#080b10;color:#fff;font:14px system-ui}canvas{display:block;width:100%;height:100%;outline:0}#hud{position:fixed;top:12px;left:12px;padding:9px 11px;background:#0009;border:1px solid #ffffff22;border-radius:8px;pointer-events:none;line-height:1.5}#cross{position:fixed;left:50%;top:50%;width:8px;height:8px;margin:-4px;border:1px solid #fff;border-radius:50%;pointer-events:none}</style></head>
+<body><div id="hud">VORTEX WASM — 3D prototype<br>WASD move · Space jump · mouse look</div><div id="cross"></div><canvas id="game" tabindex="0"></canvas>
 <script type="module">
-const canvas=document.querySelector('#game'), hud=document.querySelector('#hud');
-const ctx=canvas.getContext('2d');
-let keys=new Set(), x=0,y=0,last=performance.now(),frames=0;
-addEventListener('keydown',e=>keys.add(e.code)); addEventListener('keyup',e=>keys.delete(e.code)); canvas.focus();
-function resize(){canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0)} addEventListener('resize',resize); resize();
-function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now; const speed=260;
- if(keys.has('KeyW'))y-=speed*dt;if(keys.has('KeyS'))y+=speed*dt;if(keys.has('KeyA'))x-=speed*dt;if(keys.has('KeyD'))x+=speed*dt;
- const w=innerWidth,h=innerHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#101722';ctx.fillRect(0,0,w,h);
- ctx.strokeStyle='#1d2938';for(let gx=((w/2+x)%50+50)%50;gx<w;gx+=50){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,h);ctx.stroke()}for(let gy=((h/2+y)%50+50)%50;gy<h;gy+=50){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(w,gy);ctx.stroke()}
- ctx.fillStyle='#56b4ff';ctx.beginPath();ctx.arc(w/2,h/2,22,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('Vortex player',w/2,h/2-34);
- frames++;hud.textContent=`VORTEX WASM — playable prototype | WASD | ${frames} frames`;requestAnimationFrame(loop)} requestAnimationFrame(loop);
-</script>
-</body></html>
+import {Player} from './src/player.js';import {WORLD} from './src/world.js';import {Renderer} from './src/renderer.js';
+const canvas=document.querySelector('#game'),hud=document.querySelector('#hud');const player=new Player();let renderer;try{renderer=new Renderer(canvas)}catch(e){hud.textContent='VORTEX WASM — WebGL2 unavailable: '+e.message}
+const keys=new Set();let last=performance.now();let locked=false;
+addEventListener('keydown',e=>{keys.add(e.code);if(e.code==='Space')e.preventDefault()});addEventListener('keyup',e=>keys.delete(e.code));canvas.addEventListener('click',()=>canvas.requestPointerLock());addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===canvas);addEventListener('mousemove',e=>{if(locked){player.yaw+=e.movementX*.0025;player.pitch-=e.movementY*.0025}});addEventListener('resize',()=>renderer?.resize());renderer?.resize();
+function loop(now){const dt=Math.min(.033,(now-last)/1000);last=now;const input={moveX:(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0),moveY:(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0),jump:keys.has('Space'),lookX:0,lookY:0};player.update(input,dt);renderer?.render(player,WORLD);hud.innerHTML=`VORTEX WASM — 3D prototype<br>WASD move · Space jump · mouse look<br>pos ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}`;requestAnimationFrame(loop)}requestAnimationFrame(loop);
+</script></body></html>
