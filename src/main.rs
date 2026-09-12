@@ -15,6 +15,7 @@ fn usage() -> ! {
     eprintln!("  lavascript build <file.ls> [-o <file.wasm>]");
     eprintln!("  lavascript check <file.ls>");
     eprintln!("  lavascript fmt <file.ls> [-w]");
+    eprintln!("  lavascript version");
     process::exit(2);
 }
 
@@ -29,6 +30,7 @@ fn load(input: &str) -> (String, parser::Program) {
 fn main() {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("version") | Some("--version") => println!("lavascript 0.1.0"),
         Some("build") => {
             let input = args.next().unwrap_or_else(|| usage());
             let mut output = String::from("out.wasm");
@@ -51,11 +53,10 @@ fn main() {
             let input = args.next().unwrap_or_else(|| usage());
             let write = args.next().as_deref() == Some("-w");
             if !write && args.next().is_some() { usage(); }
-            let (source, program) = load(&input);
+            let (_, program) = load(&input);
             let formatted = formatter::format_program(&program);
             if write { fs::write(&input, formatted).unwrap_or_else(|e| { eprintln!("could not write {input}: {e}"); process::exit(1); }); }
             else { print!("{formatted}"); }
-            let _ = source;
         }
         _ => usage(),
     }
