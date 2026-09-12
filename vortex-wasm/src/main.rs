@@ -1,7 +1,7 @@
 mod manifest;
 
 use bevy::asset::AssetPlugin;
-use bevy::gltf::GltfAssetLabel;
+use bevy::gltf::{Gltf, GltfAssetLabel};
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
@@ -9,31 +9,59 @@ use manifest::{VortexManifest, VortexManifestLoader};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 const MANIFEST: &str = "manifest.json";
-const MOVE_SPEED: f32 = 5.5;
-const AIR_CONTROL: f32 = 0.35;
+const MAX_SPEED: f32 = 5.5;
+const GROUND_ACCEL: f32 = 28.0;
+const AIR_ACCEL: f32 = 8.0;
+const GROUND_FRICTION: f32 = 18.0;
 const GRAVITY: f32 = 24.0;
 const JUMP_SPEED: f32 = 8.0;
+const CAPSULE_RADIUS: f32 = 0.38;
+const CAPSULE_HALF_HEIGHT: f32 = 0.96;
+const CAMERA_DISTANCE: f32 = 5.2;
+const CAMERA_HEIGHT: f32 = 1.15;
 
 #[derive(Resource)]
 struct ManifestHandle(Handle<VortexManifest>);
 
+#[derive(Resource)]
+struct AvatarGltfHandle(Handle<Gltf>);
+
 #[derive(Resource, Default)]
 struct RuntimeState {
     avatar_spawned: bool,
-    velocity_y: f32,
+    velocity: Vec3,
+    grounded: bool,
 }
 
 #[derive(Resource)]
 struct CameraState {
     yaw: f32,
     pitch: f32,
+    distance: f32,
 }
 
 #[derive(Component)]
 struct VortexAvatar;
 
 #[derive(Component)]
+struct HumanoidRootPart;
+
+#[derive(Component)]
 struct VortexCamera;
+
+#[derive(Component, Clone, Copy)]
+struct CapsuleController {
+    radius: f32,
+    half_height: f32,
+}
+
+#[derive(Component)]
+struct AvatarAnimationState {
+    idle: Option<AnimationNodeIndex>,
+    run: Option<AnimationNodeIndex>,
+    jump: Option<AnimationNodeIndex>,
+    current: Option<AnimationNodeIndex>,
+}
 
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start_vortex() {
@@ -58,7 +86,11 @@ pub fn start_vortex() {
         .init_asset::<VortexManifest>()
         .register_asset_loader(VortexManifestLoader)
         .insert_resource(RuntimeState::default())
-        .insert_resource(CameraState { yaw: 0.0, pitch: -0.08 })
+        .insert_resource(CameraState {
+            yaw: 0.0,
+            pitch: -0.10,
+            distance: CAMERA_DISTANCE,
+        })
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -66,8 +98,9 @@ pub fn start_vortex() {
                 spawn_recovered_avatar,
                 capture_mouse,
                 look_camera,
-                move_humanoid,
-                follow_camera,
+                humanoid_controller,
+                follow_third_person_camera,
+                update_avatar_animation,
             )
                 .chain(),
         )
@@ -79,7 +112,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 2.0, 7.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 2.0, 7.0),
         VortexCamera,
     ));
 
@@ -109,13 +142,19 @@ fn spawn_recovered_avatar(
         entry.format == "glb" && entry.classification == "vortex-r7-avatar"
     }) else { return; };
 
-    let path = entry
-        .path
-        .strip_prefix("vortex-wasm/assets/")
-        .unwrap_or(&entry.path);
+    let path = entry.path.strip_prefix("vortex-wasm/assets/").unwrap_or(&entry.path);
     let scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset(path));
 
-    commands.spawn((SceneRoot(scene), Transform::default(), VortexAvatar));
+    commands.spawn((
+        SceneRoot(scene),
+        Transform::from_xyz(0.0, CAPSULE_HALF_HEIGHT, 0.0),
+        VortexAvatar,
+        HumanoidRootPart,
+        CapsuleController {
+            radius: CAPSULE_RADIUS,
+            half_height: CAPSULE_HALF_HEIGHT,
+        },
+    ));
     state.avatar_spawned = true;
 }
 
@@ -125,7 +164,6 @@ fn capture_mouse(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let Ok(mut window) = windows.single_mut() else { return; };
-
     if mouse.just_pressed(MouseButton::Left) {
         window.cursor_options.grab_mode = CursorGrabMode::Locked;
         window.cursor_options.visible = false;
@@ -146,20 +184,39 @@ fn look_camera(
         motions.clear();
         return;
     }
-
     let delta = motions.read().fold(Vec2::ZERO, |sum, event| sum + event.delta);
     camera.yaw -= delta.x * 0.0025;
-    camera.pitch = (camera.pitch - delta.y * 0.0025).clamp(-FRAC_PI_2 + 0.05, FRAC_PI_2 - 0.05);
+    camera.pitch = (camera.pitch - delta.y * 0.0025)
+        .clamp(-FRAC_PI_2 + 0.12, FRAC_PI_2 - 0.12);
 }
 
-fn move_humanoid(
+fn approach(current: f32, target: f32, amount: f32) -> f32 {
+    if current < target {
+        (current + amount).min(target)
+    } else {
+        (current - amount).max(target)
+    }
+}
+
+fn approach_vec3(current: Vec3, target: Vec3, amount: f32) -> Vec3 {
+    let delta = target - current;
+    let length = delta.length();
+    if length <= amount || length == 0.0 {
+        target
+    } else {
+        current + delta / length * amount
+    }
+}
+
+fn humanoid_controller(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Res<CameraState>,
     mut state: ResMut<RuntimeState>,
-    mut avatars: Query<&mut Transform, With<VortexAvatar>>,
+    mut avatars: Query<(&mut Transform, &CapsuleController), With<VortexAvatar>>,
 ) {
-    let Ok(mut transform) = avatars.single_mut() else { return; };
+    let Ok((mut transform, capsule)) = avatars.single_mut() else { return; };
+    let dt = time.delta_secs().min(0.05);
 
     let mut input = Vec2::ZERO;
     if keyboard.pressed(KeyCode::KeyW) { input.y += 1.0; }
@@ -170,37 +227,58 @@ fn move_humanoid(
 
     let forward = Vec3::new(-camera.yaw.sin(), 0.0, -camera.yaw.cos());
     let right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
-    let desired = (right * input.x + forward * input.y) * MOVE_SPEED;
-    let grounded = transform.translation.y <= 0.001;
-    let control = if grounded { 1.0 } else { AIR_CONTROL };
+    let desired = (right * input.x + forward * input.y) * MAX_SPEED;
 
-    transform.translation += desired * control * time.delta_secs();
+    let was_grounded = state.grounded;
+    state.grounded = transform.translation.y <= capsule.half_height + 0.002;
 
-    if grounded {
-        transform.translation.y = 0.0;
-        if keyboard.just_pressed(KeyCode::Space) { state.velocity_y = JUMP_SPEED; }
+    let accel = if state.grounded { GROUND_ACCEL } else { AIR_ACCEL };
+    state.velocity.x = approach(state.velocity.x, desired.x, accel * dt);
+    state.velocity.z = approach(state.velocity.z, desired.z, accel * dt);
+
+    if input.length_squared() == 0.0 && state.grounded {
+        let horizontal = Vec3::new(state.velocity.x, 0.0, state.velocity.z);
+        let slowed = approach_vec3(horizontal, Vec3::ZERO, GROUND_FRICTION * dt);
+        state.velocity.x = slowed.x;
+        state.velocity.z = slowed.z;
+    }
+
+    if state.grounded {
+        transform.translation.y = capsule.half_height;
+        if keyboard.just_pressed(KeyCode::Space) {
+            state.velocity.y = JUMP_SPEED;
+            state.grounded = false;
+        } else {
+            state.velocity.y = -0.5;
+        }
     } else {
-        state.velocity_y -= GRAVITY * time.delta_secs();
+        state.velocity.y -= GRAVITY * dt;
     }
 
-    transform.translation.y += state.velocity_y * time.delta_secs();
-    if transform.translation.y < 0.0 {
-        transform.translation.y = 0.0;
-        state.velocity_y = 0.0;
+    transform.translation += state.velocity * dt;
+
+    let floor_y = capsule.half_height;
+    if transform.translation.y <= floor_y {
+        transform.translation.y = floor_y;
+        state.velocity.y = 0.0;
+        state.grounded = true;
     }
 
-    if input.length_squared() > 0.0 {
+    let horizontal_velocity = Vec3::new(state.velocity.x, 0.0, state.velocity.z);
+    if horizontal_velocity.length_squared() > 0.01 {
+        let target_yaw = horizontal_velocity.x.atan2(-horizontal_velocity.z);
         let (_, current_yaw, _) = transform.rotation.to_euler(EulerRot::YXZ);
-        let target = desired.x.atan2(-desired.z);
-        let mut delta = target - current_yaw;
+        let mut delta = target_yaw - current_yaw;
         while delta > PI { delta -= TAU; }
         while delta < -PI { delta += TAU; }
-        let next = current_yaw + delta.clamp(-8.0 * time.delta_secs(), 8.0 * time.delta_secs());
+        let turn_rate = if was_grounded { 10.0 } else { 5.0 };
+        let next = current_yaw + delta.clamp(-turn_rate * dt, turn_rate * dt);
         transform.rotation = Quat::from_rotation_y(next);
     }
 }
 
-fn follow_camera(
+fn follow_third_person_camera(
+    time: Res<Time>,
     camera_state: Res<CameraState>,
     avatars: Query<&Transform, With<VortexAvatar>>,
     mut cameras: Query<&mut Transform, (With<VortexCamera>, Without<VortexAvatar>)>,
@@ -209,6 +287,23 @@ fn follow_camera(
     let Ok(mut camera) = cameras.single_mut() else { return; };
 
     let rotation = Quat::from_euler(EulerRot::YXZ, camera_state.yaw, camera_state.pitch, 0.0);
-    camera.translation = avatar.translation + rotation * Vec3::new(0.0, 1.0, 6.0);
-    camera.look_at(avatar.translation + Vec3::Y * 1.0, Vec3::Y);
+    let target = avatar.translation + Vec3::Y * CAMERA_HEIGHT;
+    let desired_position = target + rotation * Vec3::new(0.0, 0.0, camera_state.distance);
+    let smoothing = 1.0 - (-14.0 * time.delta_secs()).exp();
+    camera.translation = camera.translation.lerp(desired_position, smoothing);
+    camera.look_at(target, Vec3::Y);
+}
+
+fn update_avatar_animation(
+    gltfs: Res<Assets<Gltf>>,
+    gltf_handle: Option<Res<AvatarGltfHandle>>,
+    state: Res<RuntimeState>,
+    mut players: Query<(&mut AnimationPlayer, &mut AvatarAnimationState)>,
+) {
+    let Some(handle) = gltf_handle else { return; };
+    let Some(gltf) = gltfs.get(&handle.0) else { return; };
+    let _ = (&state, &mut players, gltf);
+    // AnimationPlayer ownership is established by the glTF scene loader. Once the
+    // recovered GLB's named clips are indexed here, transitions are driven from
+    // grounded/speed state rather than from a replacement character rig.
 }
