@@ -199,7 +199,7 @@ fn setup_start_overlay(mut commands: Commands) {
         parent.spawn((
             Text::new("VORTEX"),
             TextFont {
-                font_size: 42.0,
+                font_size: FontSize::Px(42.0),
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -208,7 +208,7 @@ fn setup_start_overlay(mut commands: Commands) {
         parent.spawn((
             Text::new("Click to start"),
             TextFont {
-                font_size: 20.0,
+                font_size: FontSize::Px(20.0),
                 ..default()
             },
             TextColor(Color::srgb(0.8, 0.8, 0.8)),
@@ -233,7 +233,7 @@ fn setup_start_overlay(mut commands: Commands) {
             .with_child((
                 Text::new("CLICK TO START / LOCK MOUSE"),
                 TextFont {
-                    font_size: 15.0,
+                    font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -467,13 +467,11 @@ fn approach(current: f32, target: f32, amount: f32) -> f32 {
 }
 
 fn approach_vec3(current: Vec3, target: Vec3, amount: f32) -> Vec3 {
-    let delta = target - current;
-    let length = delta.length();
-    if length <= amount || length == 0.0 {
-        target
-    } else {
-        current + delta / length * amount
-    }
+    Vec3::new(
+        approach(current.x, target.x, amount),
+        approach(current.y, target.y, amount),
+        approach(current.z, target.z, amount),
+    )
 }
 
 fn humanoid_controller(
@@ -488,20 +486,29 @@ fn humanoid_controller(
     }
 
     let Ok((mut transform, capsule)) = avatars.single_mut() else { return; };
-    let dt = time.delta_secs().min(0.05);
+    let dt = time.delta_secs();
 
     let mut input = Vec2::ZERO;
-    if keyboard.pressed(KeyCode::KeyW) { input.y += 1.0; }
-    if keyboard.pressed(KeyCode::KeyS) { input.y -= 1.0; }
-    if keyboard.pressed(KeyCode::KeyA) { input.x -= 1.0; }
-    if keyboard.pressed(KeyCode::KeyD) { input.x += 1.0; }
-    if input.length_squared() > 1.0 { input = input.normalize(); }
+    if keyboard.pressed(KeyCode::KeyW) {
+        input.y += 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        input.y -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        input.x -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyD) {
+        input.x += 1.0;
+    }
+    if input.length_squared() > 1.0 {
+        input = input.normalize();
+    }
 
     let forward = Vec3::new(-camera.yaw.sin(), 0.0, -camera.yaw.cos());
     let right = Vec3::new(camera.yaw.cos(), 0.0, -camera.yaw.sin());
     let desired = (right * input.x + forward * input.y) * MAX_SPEED;
 
-    let was_grounded = state.grounded;
     state.grounded = transform.translation.y <= capsule.half_height + 0.002;
 
     let accel = if state.grounded { GROUND_ACCEL } else { AIR_ACCEL };
@@ -540,12 +547,8 @@ fn humanoid_controller(
     if horizontal_velocity.length_squared() > 0.01 {
         let target_yaw = horizontal_velocity.x.atan2(-horizontal_velocity.z);
         let (_, current_yaw, _) = transform.rotation.to_euler(EulerRot::YXZ);
-        let mut delta = target_yaw - current_yaw;
-        while delta > PI { delta -= TAU; }
-        while delta < -PI { delta += TAU; }
-        let turn_rate = if was_grounded { 10.0 } else { 5.0 };
-        let next = current_yaw + delta.clamp(-turn_rate * dt, turn_rate * dt);
-        transform.rotation = Quat::from_rotation_y(next);
+        let delta = (target_yaw - current_yaw + PI).rem_euclid(TAU) - PI;
+        transform.rotation = Quat::from_rotation_y(current_yaw + delta.clamp(-10.0 * dt, 10.0 * dt));
     }
 }
 
@@ -558,16 +561,17 @@ fn follow_third_person_camera(
     let Ok(avatar) = avatars.single() else { return; };
     let Ok(mut camera) = cameras.single_mut() else { return; };
 
-    let rotation = Quat::from_euler(EulerRot::YXZ, camera_state.yaw, camera_state.pitch, 0.0);
+    let rotation = Quat::from_rotation_y(camera_state.yaw) * Quat::from_rotation_x(camera_state.pitch);
+    let offset = rotation * Vec3::new(0.0, 0.0, camera_state.distance);
     let target = avatar.translation + Vec3::Y * CAMERA_HEIGHT;
-    let desired_position = target + rotation * Vec3::new(0.0, 0.0, camera_state.distance);
-    let smoothing = 1.0 - (-14.0 * time.delta_secs()).exp();
-    camera.translation = camera.translation.lerp(desired_position, smoothing);
+    let desired = target + offset;
+    let smoothing = 1.0 - (-12.0 * time.delta_secs()).exp();
+
+    camera.translation = camera.translation.lerp(desired, smoothing);
     camera.look_at(target, Vec3::Y);
 }
 
 fn update_avatar_animation(
-    time: Res<Time>,
     state: Res<RuntimeState>,
     mut avatars: Query<(
         &mut AvatarAnimationState,
@@ -605,6 +609,4 @@ fn update_avatar_animation(
         .play(&mut player, node, ANIMATION_CROSSFADE)
         .repeat();
     animation_state.current = next_state;
-
-    let _ = time.delta_secs();
 }
